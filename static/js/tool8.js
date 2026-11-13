@@ -12,6 +12,17 @@ window.Tool8 = {
             body: JSON.stringify(body)
         });
         const data = await res.json();
+
+        // --- gold star: fetch Screener symbols ---
+        let screenerSymbols = new Set();
+        try {
+            const sres = await fetch("/screener");
+            const sdata = await sres.json();
+            (sdata.rows || []).forEach(r => screenerSymbols.add(r.symbol));
+        } catch (e) {}
+        window.AppState.screenerSymbols = screenerSymbols;
+        // --- end gold star ---
+
         this.render(data.result || {});
     },
 
@@ -240,6 +251,10 @@ window.Tool8 = {
             const shortName = (r.name || "").length > 15 ? (r.name || "").slice(0, 15) + "…" : (r.name || "");
             const fullName = (r.name || "").replace(/"/g, "&quot;");
 
+            // --- gold star ---
+            const star = window.AppState.screenerSymbols?.has(r.symbol) ? "⭐ " : "";
+            // --- end gold star ---
+
             let points = 0;
             const possible = 4;
             const reasons = [];
@@ -278,10 +293,11 @@ window.Tool8 = {
             const hitCls = hitPct >= 75 ? "positive" : hitPct >= 50 ? "" : "negative";
             const hitTitle = reasons.length ? reasons.join("\n") : "No rules matched";
             const hitText = `${hitPct}%`;
-            const highlight = hitPct >= 50 ? 'style="background:rgba(74,222,128,0.12)"' : "";
+            const hitThreshold = parseFloat(localStorage.getItem("hitThreshold") || "50");
+            const highlight = hitPct >= hitThreshold ? 'style="background:rgba(74,222,128,0.12)"' : "";
 
             html += `<tr class="main-row" data-symbol="${r.symbol}" ${highlight}>
-                <td>${buildSymbolLink(r.symbol, indexKey)}</td>
+                <td>${star}${buildSymbolLink(r.symbol, indexKey)}</td>
                 <td title="${fullName}">${shortName}</td>
                 <td>${formatNumber(r.price, "price")}</td>
                 <td class="${cls}">${formatNumber(r.change, "price")}</td>

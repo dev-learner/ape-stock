@@ -49,12 +49,14 @@ async function loadSettings() {
         const res = await fetch("/settings/get");
         if (!res.ok) return;
         const s = await res.json();
+
         const set = (id, key) => {
             if (s[key] != null) {
                 const el = document.getElementById(id);
                 if (el) el.value = s[key];
             }
         };
+
         set("listLimit", "listLimit");
         set("riserPct", "riserPct");
         set("fallerPct", "fallerPct");
@@ -62,6 +64,14 @@ async function loadSettings() {
         set("notional", "notional");
         set("stampPct", "stampPct");
         set("trackerCloseTarget", "tracker_close_target");
+
+        // Keep localStorage in sync for Tool 8 etc.
+        if (s.listLimit) localStorage.setItem("listLimit", s.listLimit);
+        if (s.riserPct) localStorage.setItem("riserPct", s.riserPct);
+        if (s.fallerPct) localStorage.setItem("fallerPct", s.fallerPct);
+        if (s.hitThreshold) localStorage.setItem("hitThreshold", s.hitThreshold);
+        if (s.notional) localStorage.setItem("notional", s.notional);
+        if (s.stampPct) localStorage.setItem("stampPct", s.stampPct);
     } catch (e) {
         console.warn("Could not load settings", e);
     }
@@ -77,14 +87,24 @@ document.getElementById("saveBtn").addEventListener("click", async () => {
         stampPct: document.getElementById("stampPct").value,
         tracker_close_target: document.getElementById("trackerCloseTarget").value
     };
+
     try {
         const res = await fetch("/settings/save", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify(payload)
         });
+
         const msg = document.getElementById("settings-msg");
         if (res.ok) {
+            // Write to localStorage so Tool 8 sees the values immediately
+            localStorage.setItem("listLimit", payload.listLimit);
+            localStorage.setItem("riserPct", payload.riserPct);
+            localStorage.setItem("fallerPct", payload.fallerPct);
+            localStorage.setItem("hitThreshold", payload.hitThreshold);
+            localStorage.setItem("notional", payload.notional);
+            localStorage.setItem("stampPct", payload.stampPct);
+
             msg.textContent = "Settings saved";
             msg.style.color = "#4ade80";
         } else {

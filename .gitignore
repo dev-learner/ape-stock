@@ -16,6 +16,11 @@ __pycache__/
 *.sqlite3
 ape_stock.db
 
+# SQLite temporary files
+*.db-shm
+*.db-wal
+*.db-journal
+
 # Environment / secrets
 .env
 .env.*
