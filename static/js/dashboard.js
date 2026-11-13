@@ -167,7 +167,9 @@ window.Dashboard = {
                     yfinance<br>
                     Vanilla JS + CSS<br>
                     Canvas sparklines<br>
-                    UK timezone aware
+                    UK timezone aware<br>
+                    <br>
+                    <a href="https://github.com/dev-learner/ape-stock" target="_blank" style="color:#7fdbff;">GitHub repo</a>
                     </div>
                 </div>
 
