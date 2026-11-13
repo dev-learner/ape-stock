@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ape-stock</title>
+    <link rel="stylesheet" href="/static/style.css?v=8">
+</head>
+<body>
+<div id="status-bar" style="background:#0d1b2a; color:#7fdbff; padding:6px 16px; font-size:0.85rem; display:flex; justify-content:space-between; align-items:center;">
+    <span id="cache-status">Cache: loading…</span>
+    <span id="ftse-status" style="font-size:1.05rem; color:white;"></span>
+    <span id="countdown"></span>
+</div>
+
+    <div class="dashboard">
+        <div class="left-column">
+            <h2>Tools</h2>
+            <button data-tool="dashboard">Dashboard</button>
+            <button data-tool="2">Ad-Hoc Scripts</button>
+            <button data-tool="3">Holdings Tracker</button>
+            <button data-tool="4">Screener</button>
+            <button data-tool="5">5</button>
+            <button data-tool="6">6</button>
+            <button data-tool="7">Rules</button>
+            <button data-tool="8">Risers / Fallers</button>
+            <button id="settings-btn" style="background:#1e5c3a; margin-top:12px;">Settings</button>
+            <button id="exit-btn" style="background:#5c2a2a;">Exit</button>
+        </div>
+        <div class="right-column" id="results">
+            <!-- Dashboard content will be injected by dashboard.js -->
+        </div>
+    </div>
+
+    <script src="/static/js/core.js?v=8"></script>
+    <script src="/static/js/tool2.js?v=8"></script>
+    <script src="/static/js/tool3.js?v=8"></script>
+    <script src="/static/js/tool4.js?v=8"></script>
+    <script src="/static/js/tool6.js?v=8"></script>
+    <script src="/static/js/tool7.js?v=8"></script>
+    <script src="/static/js/tool8.js?v=8"></script>
+    <script src="/static/js/dashboard.js?v=8"></script>
+
+    <script>
+        document.querySelectorAll("[data-tool]").forEach(el => {
+            el.addEventListener("click", e => {
+                e.preventDefault();
+                const id = el.dataset.tool;
+                console.log("clicked tool", id, "Tool2 exists:", !!window.Tool2);
+                window.AppState.currentTool = id;
+                if (id === "2" && window.Tool2) {
+                    console.log("calling Tool2.show()");
+                    window.Tool2.show();
+                }
+                else if (id === "3" && window.Tool3) window.Tool3.show();
+                else if (id === "4" && window.Tool4) window.Tool4.show();
+                else if (id === "6" && window.Tool6) window.Tool6.show();
+                else if (id === "7" && window.Tool7) window.Tool7.show();
+                else if (id === "8" && window.Tool8) window.Tool8.show();
+                else if (id === "dashboard") {
+                    if (window.Dashboard) window.Dashboard.show();
+                }
+                else {
+                    console.log("falling through to Dashboard");
+                    window.Dashboard.show();
+                }
+            });
+        });
+
+        document.getElementById("settings-btn").addEventListener("click", () => {
+            location.href = "/settings";
+        });
+
+        document.getElementById("exit-btn").addEventListener("click", () => {
+            if (confirm("Close ape-stock?")) {
+                window.close();
+                setTimeout(() => {
+                    document.body.innerHTML = "<div style='padding:40px;'><h2>You can close this tab.</h2></div>";
+                }, 150);
+            }
+        });
+
+        // Start status polling and auto-refresh
+        updateCacheStatus();
+        setInterval(updateCacheStatus, 15000);
+        startAutoRefresh();
+        window.addEventListener("storage", startAutoRefresh);
+
+        // Show dashboard on load
+        if (window.Dashboard) window.Dashboard.show();
+    </script>
+</body>
+</html>

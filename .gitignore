@@ -1,0 +1,37 @@
+# ape-stock/.ignore
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Database (do not commit your live data)
+*.db
+*.sqlite
+*.sqlite3
+ape_stock.db
+
+# Environment / secrets
+.env
+.env.*
+set-env.bat
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Optional: large data dumps if you have any
+*.csv
+*.json
