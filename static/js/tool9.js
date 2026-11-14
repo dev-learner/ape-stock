@@ -34,6 +34,17 @@ window.Tool9 = {
                 <label for="trackerCloseTarget">Tracker Close Target (%)</label>
                 <input type="number" id="trackerCloseTarget" min="1" max="10" step="0.5" value="3">
 
+                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">RSI Settings</h2>
+
+                <label for="rsiOversold">Oversold Below</label>
+                <input type="number" id="rsiOversold" min="1" max="50" step="1" value="30">
+
+                <label for="rsiOverbought">Overbought Above</label>
+                <input type="number" id="rsiOverbought" min="50" max="100" step="1" value="70">
+
+                <label for="rsiLength">Length</label>
+                <input type="number" id="rsiLength" min="1" max="30" step="1" value="7">
+
                 <button id="saveBtn">Save Settings</button>
                 <div id="settings-msg"></div>
             </div>`;
@@ -63,6 +74,9 @@ window.Tool9 = {
             set("notional", "notional");
             set("stampPct", "stampPct");
             set("trackerCloseTarget", "tracker_close_target");
+            set("rsiOversold", "rsiOversold");
+            set("rsiOverbought", "rsiOverbought");
+            set("rsiLength", "rsiLength");
 
             // Keep localStorage in sync for Tool 8 etc.
             if (s.listLimit) localStorage.setItem("listLimit", s.listLimit);
@@ -71,6 +85,9 @@ window.Tool9 = {
             if (s.hitThreshold) localStorage.setItem("hitThreshold", s.hitThreshold);
             if (s.notional) localStorage.setItem("notional", s.notional);
             if (s.stampPct) localStorage.setItem("stampPct", s.stampPct);
+            if (s.rsiOversold) localStorage.setItem("rsiOversold", s.rsiOversold);
+            if (s.rsiOverbought) localStorage.setItem("rsiOverbought", s.rsiOverbought);
+            if (s.rsiLength) localStorage.setItem("rsiLength", s.rsiLength);
         } catch (e) {
             console.warn("Could not load settings", e);
         }
@@ -84,7 +101,10 @@ window.Tool9 = {
             hitThreshold: document.getElementById("hitThreshold").value,
             notional: document.getElementById("notional").value,
             stampPct: document.getElementById("stampPct").value,
-            tracker_close_target: document.getElementById("trackerCloseTarget").value
+            tracker_close_target: document.getElementById("trackerCloseTarget").value,
+            rsiOversold: document.getElementById("rsiOversold").value,
+            rsiOverbought: document.getElementById("rsiOverbought").value,
+            rsiLength: document.getElementById("rsiLength").value
         };
 
         try {
@@ -102,6 +122,9 @@ window.Tool9 = {
                 localStorage.setItem("hitThreshold", payload.hitThreshold);
                 localStorage.setItem("notional", payload.notional);
                 localStorage.setItem("stampPct", payload.stampPct);
+                localStorage.setItem("rsiOversold", payload.rsiOversold);
+                localStorage.setItem("rsiOverbought", payload.rsiOverbought);
+                localStorage.setItem("rsiLength", payload.rsiLength);                
 
                 msg.textContent = "Settings saved";
                 msg.style.color = "#4ade80";

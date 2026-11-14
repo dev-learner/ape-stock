@@ -284,9 +284,13 @@ window.Tool8 = {
                 reasons.push(`Vol/Avg ≥ ${volRatioThreshold}× (${volRatioVal.toFixed(1)}×)`);
             }
 
-            if (r.change_pct != null && r.change_pct <= -fallersPct && r.rsi7 != null && r.rsi7 <= 30) {
+            // RSI settings (fall back to classic defaults if missing)
+            const rsiLen = parseInt(localStorage.getItem("rsiLength") || "7", 10);
+            const rsiOversold = parseFloat(localStorage.getItem("rsiOversold") || "30");
+
+            if (r.change_pct != null && r.change_pct <= -fallersPct && r.rsi7 != null && r.rsi7 <= rsiOversold) {
                 points++;
-                reasons.push(`RSI(7) ≤ 30 (${r.rsi7.toFixed(1)}) on faller`);
+                reasons.push(`RSI(${rsiLen}) ≤ ${rsiOversold} (${r.rsi7.toFixed(1)}) on faller`);
             }
 
             const hitPct = Math.round((points / possible) * 100);

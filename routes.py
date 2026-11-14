@@ -73,6 +73,20 @@ def settings_save():
         except (ValueError, TypeError):
             pass
 
+    # RSI settings with validation
+    for key, min_v, max_v, default in (
+        ("rsiOversold", 1, 50, 30),
+        ("rsiOverbought", 50, 100, 70),
+        ("rsiLength", 1, 30, 7),
+    ):
+        if key in data and data[key] is not None:
+            try:
+                val = int(float(data[key]))
+                val = max(min_v, min(max_v, val))
+                set_setting(key, val)
+            except (ValueError, TypeError):
+                set_setting(key, default)
+
     # All other settings stored as strings
     for key in ("listLimit", "riserPct", "fallerPct", "hitThreshold", "notional", "stampPct"):
         if key in data and data[key] is not None:
@@ -90,7 +104,10 @@ def settings_get():
         "fallerPct": get_setting("fallerPct", "3"),
         "hitThreshold": get_setting("hitThreshold", "50"),
         "notional": get_setting("notional", "500"),
-        "stampPct": get_setting("stampPct", "0.5")
+        "stampPct": get_setting("stampPct", "0.5"),
+        "rsiOversold": get_setting("rsiOversold", "30"),
+        "rsiOverbought": get_setting("rsiOverbought", "70"),
+        "rsiLength": get_setting("rsiLength", "7"),
     })
 
 @bp.route("/status")
@@ -230,15 +247,23 @@ def run_tool(tool_id):
                 cur.execute("""
                     SELECT close FROM daily_closes
                     WHERE symbol = ? AND close IS NOT NULL
-                    ORDER BY date DESC LIMIT 30
+                    ORDER BY date DESC LIMIT 60
                 """, (sym,))
                 closes = [row[0] for row in cur.fetchall()][::-1]
+
+                # RSI using settings
+                try:
+                    rsi_len = int(get_setting("rsiLength", "7"))
+                    rsi_len = max(1, min(30, rsi_len))
+                except (TypeError, ValueError):
+                    rsi_len = 7
+
                 r["rsi7"] = None
-                if len(closes) >= 8:
+                if len(closes) >= rsi_len + 1:
                     deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
                     gains = [d if d > 0 else 0 for d in deltas]
                     losses = [-d if d < 0 else 0 for d in deltas]
-                    period = 7
+                    period = rsi_len
                     avg_gain = sum(gains[:period]) / period
                     avg_loss = sum(losses[:period]) / period
                     for i in range(period, len(deltas)):
@@ -249,6 +274,7 @@ def run_tool(tool_id):
                     else:
                         rs = avg_gain / avg_loss
                         r["rsi7"] = round(100 - (100 / (1 + rs)), 1)
+
             conn.close()
             return rows
 
