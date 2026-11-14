@@ -30,6 +30,9 @@ window.Dashboard = {
         const dailyClosesLast = status.daily_closes_last || "—";
         const constituents = status.constituents || "—";
 
+        // Load saved notes
+        const savedNotes = localStorage.getItem("dashboard_notes") || "";
+
         container.innerHTML = `
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:16px; padding:8px;">
 
@@ -39,6 +42,109 @@ window.Dashboard = {
                     <p>ape-stock has evolved from a simple “buy the big fallers” tool into a decision-support system for discretionary dip-buying on pre-qualified names.</p>
                     <p>The Screener surfaces relatively stable, higher-quality FTSE names (trend + size). Persistence at the top of that list has shown strong historical edge. Tool 8 still shows the day’s movers so you can see dips inside the better names. Tool 3 tracks the positions you actually take, with charts and context.</p>
                     <p style="color:#fbbf24;"><strong>Note:</strong> The user is still learning. The strategy is shifting from mechanical dip-buying toward “buy success after serious analysis” — filters, persistence, news awareness, and live monitoring matter more than raw faller size.</p>
+                </div>
+
+                <!-- Notes -->
+                <div class="card" id="notes-card">
+                    <h3>Notes</h3>
+                    <div id="notes-display" style="white-space:pre-wrap; min-height:80px; font-size:0.9rem; line-height:1.45;">${this.escapeHtml(savedNotes) || "<span style='color:#666;'>No notes yet.</span>"}</div>
+                    <textarea id="notes-edit" style="display:none; width:100%; min-height:120px; background:#0d1b2a; color:white; border:1px solid rgba(255,255,255,0.15); border-radius:4px; padding:8px; font-family:inherit; font-size:0.9rem; resize:vertical;">${savedNotes}</textarea>
+                    <div style="text-align:right; margin-top:8px;">
+                        <button id="notes-toggle" class="mini-btn" style="background:#1e5c3a;">Edit</button>
+                    </div>
+                </div>
+
+                <!-- Tool 8 -->
+                <div class="card">
+                    <h3>Tool 8 — Risers / Fallers</h3>
+                    <div class="section"><strong>Description</strong><br>
+                    Surfaces the day’s biggest risers and fallers across the FTSE universe, with a simple Hit score. Primary discovery view for short-term moves.</div>
+                    <div class="section"><strong>Data</strong><br>
+                    Risers: <span id="dash-risers">—</span><br>
+                    Fallers: <span id="dash-fallers">—</span></div>
+                    <div class="section"><strong>To Do</strong>
+                    <ul>
+                        <li>Visual badge on names that are also current Screener safe-bets</li>
+                        <li>Optional news / RNS flag</li>
+                    </ul></div>
+                </div>
+
+                <!-- Tool 4 -->
+                <div class="card">
+                    <h3>Tool 4 — Screener</h3>
+                    <div class="section"><strong>Description</strong><br>
+                    Builds a relatively stable list of “safe-bet” names (above 50- & 200-day MAs, reasonable 3-month return, size floor). Default sort by 3 m %. Foundation for higher-quality dip-buys.</div>
+                    <div class="section"><strong>Data</strong><br>
+                    Safe bets: ${safeBets}<br>
+                    Metrics last updated: ${metricsUpdated}</div>
+                    <div class="section"><strong>To Do</strong>
+                    <ul>
+                        <li>Live Price + Day % (wired to auto-refresh)</li>
+                        <li>Acceleration cue (3 m vs 6 m)</li>
+                        <li>Persistence ranking display / filter</li>
+                        <li>News / RNS presence flag</li>
+                        <li>Optional “also down today” toggle</li>
+                    </ul></div>
+                </div>
+
+                <!-- Tool 3 -->
+                <div class="card">
+                    <h3>Tool 3 — Holdings Tracker</h3>
+                    <div class="section"><strong>Description</strong><br>
+                    Tracks simulated (or real) positions taken from the Screener or Tool 8. Shows entry, live price, day marks, and three charts (90-day 5-min, today 5-min, 14-day daily). Supports discretionary monitoring and earlier exits.</div>
+                    <div class="section"><strong>Data</strong><br>
+                    Open holdings: ${openCount}<br>
+                    Open P&L (net): £${totalPnl.toFixed(2)}</div>
+                    <div class="section"><strong>To Do</strong>
+                    <ul>
+                        <li>Live update of current day’s +D mark</li>
+                        <li>Drag-and-drop reordering</li>
+                        <li>Expandable fundamentals row</li>
+                        <li>Alerts (price, news, rank drop, MA loss)</li>
+                    </ul></div>
+                </div>
+
+                <!-- Tool 7 -->
+                <div class="card">
+                    <h3>Tool 7 — Rules</h3>
+                    <div class="section"><strong>Description</strong><br>
+                    Central place for the parameters that drive the Screener, Hit score, and Tracker (thresholds, weights, targets). Currently shows hard-coded values; will become editable.</div>
+                    <div class="section"><strong>Data</strong><br>
+                    Parameters: hard-coded (see page)</div>
+                    <div class="section"><strong>To Do</strong>
+                    <ul>
+                        <li>Make all thresholds / weights editable and persisted</li>
+                        <li>Screener and Hit logic read from here</li>
+                    </ul></div>
+                </div>
+
+                <!-- Tool 2 -->
+                <div class="card">
+                    <h3>Tool 2 — Ad-Hoc Scripts</h3>
+                    <div class="section"><strong>Description</strong><br>
+                    Run Python analysis and data-prep scripts (metrics update, back-tests, dumps, grid searches). The workbench for testing ideas before they move into the live tools.</div>
+                    <div class="section"><strong>Data</strong><br>
+                    (left as-is for now)</div>
+                    <div class="section"><strong>To Do</strong>
+                    <ul>
+                        <li>Walk-forward version of persistence ranking</li>
+                        <li>News-flag back-test</li>
+                        <li>More sector / industry scripts</li>
+                    </ul></div>
+                </div>
+
+                <!-- Tool 5 & 6 placeholders -->
+                <div class="card">
+                    <h3>Tool 5</h3>
+                    <div class="section"><strong>Description</strong><br>Placeholder.</div>
+                    <div class="section"><strong>Data</strong><br>—</div>
+                    <div class="section"><strong>To Do</strong><br>—</div>
+                </div>
+                <div class="card">
+                    <h3>Tool 6</h3>
+                    <div class="section"><strong>Description</strong><br>Placeholder.</div>
+                    <div class="section"><strong>Data</strong><br>—</div>
+                    <div class="section"><strong>To Do</strong><br>—</div>
                 </div>
 
                 <!-- General -->
@@ -120,104 +226,37 @@ window.Dashboard = {
                     </div>
                 </div>
 
-                <!-- Tool 2 -->
-                <div class="card">
-                    <h3>Tool 2 — Ad-Hoc Scripts</h3>
-                    <div class="section"><strong>Description</strong><br>
-                    Run Python analysis and data-prep scripts (metrics update, back-tests, dumps, grid searches). The workbench for testing ideas before they move into the live tools.</div>
-                    <div class="section"><strong>Data</strong><br>
-                    (left as-is for now)</div>
-                    <div class="section"><strong>To Do</strong>
-                    <ul>
-                        <li>Walk-forward version of persistence ranking</li>
-                        <li>News-flag back-test</li>
-                        <li>More sector / industry scripts</li>
-                    </ul></div>
-                </div>
-
-                <!-- Tool 3 -->
-                <div class="card">
-                    <h3>Tool 3 — Holdings Tracker</h3>
-                    <div class="section"><strong>Description</strong><br>
-                    Tracks simulated (or real) positions taken from the Screener or Tool 8. Shows entry, live price, day marks, and three charts (90-day 5-min, today 5-min, 14-day daily). Supports discretionary monitoring and earlier exits.</div>
-                    <div class="section"><strong>Data</strong><br>
-                    Open holdings: ${openCount}<br>
-                    Open P&L (net): £${totalPnl.toFixed(2)}</div>
-                    <div class="section"><strong>To Do</strong>
-                    <ul>
-                        <li>Live update of current day’s +D mark</li>
-                        <li>Drag-and-drop reordering</li>
-                        <li>Expandable fundamentals row</li>
-                        <li>Alerts (price, news, rank drop, MA loss)</li>
-                    </ul></div>
-                </div>
-
-                <!-- Tool 4 -->
-                <div class="card">
-                    <h3>Tool 4 — Screener</h3>
-                    <div class="section"><strong>Description</strong><br>
-                    Builds a relatively stable list of “safe-bet” names (above 50- & 200-day MAs, reasonable 3-month return, size floor). Default sort by 3 m %. Foundation for higher-quality dip-buys.</div>
-                    <div class="section"><strong>Data</strong><br>
-                    Safe bets: ${safeBets}<br>
-                    Metrics last updated: ${metricsUpdated}</div>
-                    <div class="section"><strong>To Do</strong>
-                    <ul>
-                        <li>Live Price + Day % (wired to auto-refresh)</li>
-                        <li>Acceleration cue (3 m vs 6 m)</li>
-                        <li>Persistence ranking display / filter</li>
-                        <li>News / RNS presence flag</li>
-                        <li>Optional “also down today” toggle</li>
-                    </ul></div>
-                </div>
-
-                <!-- Tool 5 placeholder -->
-                <div class="card">
-                    <h3>Tool 5</h3>
-                    <div class="section"><strong>Description</strong><br>Placeholder.</div>
-                    <div class="section"><strong>Data</strong><br>—</div>
-                    <div class="section"><strong>To Do</strong><br>—</div>
-                </div>
-
-                <!-- Tool 6 placeholder -->
-                <div class="card">
-                    <h3>Tool 6</h3>
-                    <div class="section"><strong>Description</strong><br>Placeholder.</div>
-                    <div class="section"><strong>Data</strong><br>—</div>
-                    <div class="section"><strong>To Do</strong><br>—</div>
-                </div>
-
-                <!-- Tool 7 -->
-                <div class="card">
-                    <h3>Tool 7 — Rules</h3>
-                    <div class="section"><strong>Description</strong><br>
-                    Central place for the parameters that drive the Screener, Hit score, and Tracker (thresholds, weights, targets). Currently shows hard-coded values; will become editable.</div>
-                    <div class="section"><strong>Data</strong><br>
-                    Parameters: hard-coded (see page)</div>
-                    <div class="section"><strong>To Do</strong>
-                    <ul>
-                        <li>Make all thresholds / weights editable and persisted</li>
-                        <li>Screener and Hit logic read from here</li>
-                    </ul></div>
-                </div>
-
-                <!-- Tool 8 -->
-                <div class="card">
-                    <h3>Tool 8 — Risers / Fallers</h3>
-                    <div class="section"><strong>Description</strong><br>
-                    Surfaces the day’s biggest risers and fallers across the FTSE universe, with a simple Hit score. Primary discovery view for short-term moves.</div>
-                    <div class="section"><strong>Data</strong><br>
-                    Risers: <span id="dash-risers">—</span><br>
-                    Fallers: <span id="dash-fallers">—</span></div>
-                    <div class="section"><strong>To Do</strong>
-                    <ul>
-                        <li>Visual badge on names that are also current Screener safe-bets</li>
-                        <li>Optional news / RNS flag</li>
-                    </ul></div>
-                </div>
-
-
             </div>
         `;
+
+        // Notes Edit / Save toggle
+        const notesToggle = document.getElementById("notes-toggle");
+        const notesDisplay = document.getElementById("notes-display");
+        const notesEdit = document.getElementById("notes-edit");
+        if (notesToggle && notesDisplay && notesEdit) {
+            notesToggle.addEventListener("click", () => {
+                const isEditing = notesEdit.style.display !== "none";
+                if (isEditing) {
+                    // Save
+                    const text = notesEdit.value;
+                    localStorage.setItem("dashboard_notes", text);
+                    notesDisplay.innerHTML = text.trim()
+                        ? this.escapeHtml(text)
+                        : "<span style='color:#666;'>No notes yet.</span>";
+                    notesEdit.style.display = "none";
+                    notesDisplay.style.display = "block";
+                    notesToggle.textContent = "Edit";
+                    notesToggle.style.background = "#1e5c3a";
+                } else {
+                    // Edit
+                    notesEdit.style.display = "block";
+                    notesDisplay.style.display = "none";
+                    notesEdit.focus();
+                    notesToggle.textContent = "Save";
+                    notesToggle.style.background = "#1e3a5c";
+                }
+            });
+        }
 
         // Lightweight style injection if needed
         if (!document.getElementById("dash-card-style")) {
@@ -245,12 +284,21 @@ window.Dashboard = {
         }
     },
 
+    escapeHtml(text) {
+        if (!text) return "";
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML.replace(/\n/g, "<br>");
+    },
+
     formatDate(iso) {
         if (!iso) return "—";
         try {
             const d = new Date(iso);
-            const pad = n => String(n).padStart(2, "0");
-            return `${pad(d.getDate())}:${pad(d.getMonth()+1)}:${d.getFullYear()} - ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+            return d.toLocaleString(undefined, {
+                day: "2-digit", month: "short", year: "numeric",
+                hour: "2-digit", minute: "2-digit"
+            });
         } catch {
             return iso;
         }
