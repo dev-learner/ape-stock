@@ -1,6 +1,18 @@
 You are continuing development of a local Flask application called ape-stock.
 
-Current goals, tech stack, design decisions and todo items live on the Dashboard page of the running app.
+To gain a complete understanding of ape-stock, it's goals and it's components (tools 1-8) study tool1: 'Dashboard' page and it's contents.
+
+Keep the UK-only focus: FTSE 100 & FTSE 250.
+
+Use small modular changes (shared-core philosophy).
+
+Remove redundant code.
+
+IMPORTANT - If you edit a file: 
+1: Always make sure code is fully documented.
+2: If there is a 'minor' change in part of a function, or block of code, return the complete function (or block of code).
+3: If the edit is more than 'minor' return the complete file.
+4: NEVER return snippets of code.
 
 ===== DIRECTORY STRUCTURE =====
 ape-stock/
@@ -22,6 +34,7 @@ ape-stock/
 │   │   ├── dashboard.js
 │   │   ├── tool2.js
 │   │   ├── tool3.js
+│   │   ├── tool4.js
 │   │   ├── tool6.js
 │   │   ├── tool7.js
 │   │   ├── tool8.js
@@ -32,13 +45,21 @@ ape-stock/
 │   ├── check_avg_volume.py
 │   ├── create_handover_prompt.py
 │   ├── dump_daily_closes.py
+│   ├── dump_holdings_history.py
 │   ├── dump_index_quotes.py
+│   ├── exdiv_pre_analysis.py
 │   ├── gap_down_volume.py
 │   ├── gap_grid_search.py
+│   ├── hit_backtest.py
+│   ├── hit_grid_search.py
+│   ├── intraday_bounce.py
 │   ├── list_yahoo_sectors.py
 │   ├── nwg_last_14.py
 │   ├── quick_faller_volume.py
+│   ├── screener_analyse_target_stop_backtest.py
+│   ├── screener_target_stop_backtest.py
 │   ├── update_fundamentals.py
+│   ├── update_screener_metrics.py
 │   ├── update_sectors.py
 
 ===== FILE CONTENTS =====
@@ -50,21 +71,54 @@ from db import init_db
 from background import catchup_daily_closes, background_updater
 from routes import bp as main_bp
 from scripts_runner import bp as scripts_bp
-from data import refresh_constituents_if_needed
 from holdings import bp as holdings_bp
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+import subprocess
+import sys
+from pathlib import Path
 
 app = Flask(__name__)
 app.register_blueprint(main_bp)
 app.register_blueprint(scripts_bp)
 app.register_blueprint(holdings_bp)
 
+def ensure_screener_metrics():
+    """Run screener metrics update if it has not been run since the last trading day."""
+    from db import get_db
+    UK = ZoneInfo("Europe/London")
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM app_settings WHERE key = 'screener_metrics_updated'")
+    row = cur.fetchone()
+    conn.close()
+
+    last = None
+    if row and row[0]:
+        try:
+            last = datetime.fromisoformat(row[0])
+        except Exception:
+            last = None
+
+    now = datetime.now(UK)
+    needs_run = last is None or (now - last) > timedelta(hours=20)
+
+    if needs_run:
+        print("Screener metrics stale or missing — updating…")
+        script = Path(__file__).parent / "scripts" / "update_screener_metrics.py"
+        try:
+            subprocess.run([sys.executable, str(script)], check=False, timeout=120)
+        except Exception as e:
+            print(f"Screener metrics update failed: {e}")
+    else:
+        print(f"Screener metrics up to date (last={last})")
 
 if __name__ == "__main__":
     init_db()
-    refresh_constituents_if_needed()   # <-- was refresh_constituents()
     catchup_daily_closes()
+    ensure_screener_metrics()
     threading.Thread(target=background_updater, daemon=True).start()
-    app.run(host="127.0.0.1", port=5050, debug=False)
+    app.run(host="0.0.0.0", port=5050, debug=False)
 
 ===== FILE: background.py =====
 # background.py
@@ -72,7 +126,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import yfinance as yf
-from db import get_db
+from db import get_db, get_setting
 from data import fetch_quote
 import warnings
 warnings.filterwarnings("ignore", category=Warning)
@@ -119,61 +173,89 @@ def collapse_old_snapshots():
     conn.close()
 
 def catchup_daily_closes():
+    """Fill any missing daily closes. Skips when the market is closed and data is already current."""
+    now = datetime.now(UK)
+    is_weekday = now.weekday() < 5
+    market_open = is_weekday and 8 <= now.hour < 17
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT MAX(date) FROM daily_closes")
     row = cur.fetchone()
-    last_date = row[0] if row and row[0] else None
-    today = datetime.now(UK).date()
-    if last_date:
-        last = datetime.strptime(last_date, "%Y-%m-%d").date()
-        if (today - last).days <= 1:
-            conn.close()
-            print("daily_closes is up to date")
+    last_date_str = row[0] if row and row[0] else None
+    conn.close()
+
+    def last_trading_day(d):
+        """Return the most recent Mon-Fri on or before d."""
+        while d.weekday() >= 5:          # Sat/Sun
+            d -= timedelta(days=1)
+        return d
+
+    today = now.date()
+    expected = last_trading_day(today if market_open or now.hour >= 17 else today - timedelta(days=1))
+
+    if last_date_str:
+        last_dt = datetime.fromisoformat(last_date_str).date()
+        if not market_open and last_dt >= expected:
+            print(f"Catch-up: market closed, daily_closes already current (last={last_date_str}) — skipping")
             return
-    print(f"Catch-up: daily_closes last date = {last_date}, filling gaps…")
+        print(f"Catch-up: daily_closes last date = {last_date_str}, filling gaps…")
+    else:
+        print("Catch-up: no daily_closes yet — running full fill")
+
+    # --- fill logic ---
+    conn = get_db()
+    cur = conn.cursor()
     cur.execute("SELECT DISTINCT symbol FROM index_constituents")
     symbols = [r[0] for r in cur.fetchall()]
-    for col, typ in [("open", "REAL"), ("high", "REAL"), ("low", "REAL"), ("volume", "INTEGER")]:
-        try:
-            cur.execute(f"ALTER TABLE daily_closes ADD COLUMN {col} {typ}")
-        except Exception:
-            pass
-    conn.commit()
-    inserted = 0
+    conn.close()
+
+    if not symbols:
+        print("Catch-up: no constituents found")
+        return
+
+    end = now.date()
+    if last_date_str:
+        start = datetime.fromisoformat(last_date_str).date() + timedelta(days=1)
+    else:
+        start = end - timedelta(days=30)
+
+    if start > end:
+        print("Catch-up: nothing to fill")
+        return
+
+    print(f"Catch-up: filling {len(symbols)} symbols from {start} to {end}")
+    filled = 0
     for i, sym in enumerate(symbols, 1):
         try:
-            hist = yf.Ticker(sym).history(period="10d", interval="1d", auto_adjust=False)
+            ticker = yf.Ticker(sym)
+            hist = ticker.history(start=start.isoformat(), end=(end + timedelta(days=1)).isoformat(), interval="1d")
             if hist.empty:
                 continue
-            for dt, row in hist.iterrows():
-                date_str = dt.strftime("%Y-%m-%d")
-                if last_date and date_str <= last_date:
-                    continue
-                o = float(row["Open"]) if row["Open"] == row["Open"] else None
-                h = float(row["High"]) if row["High"] == row["High"] else None
-                l = float(row["Low"]) if row["Low"] == row["Low"] else None
-                c = float(row["Close"]) if row["Close"] == row["Close"] else None
-                v = int(row["Volume"]) if row["Volume"] == row["Volume"] else None
-                if c is None:
-                    continue
-                cur.execute("""
-                    INSERT OR REPLACE INTO daily_closes
-                    (symbol, date, open, high, low, close, volume)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (sym, date_str, o, h, l, c, v))
-                inserted += 1
-            if i % 50 == 0:
-                conn.commit()
+            conn = get_db()
+            cur = conn.cursor()
+            for idx, row in hist.iterrows():
+                d = idx.date().isoformat()
+                close = row["Close"]
+                vol = row["Volume"]
+                if close and close == close:  # not NaN
+                    cur.execute("""
+                        INSERT OR REPLACE INTO daily_closes (symbol, date, close, volume)
+                        VALUES (?, ?, ?, ?)
+                    """, (sym, d, float(close), int(vol) if vol == vol else None))
+                    filled += 1
+            conn.commit()
+            conn.close()
+            if i % 25 == 0:
+                print(f"  …{i}/{len(symbols)}", flush=True)
             time.sleep(0.2)
         except Exception as e:
-            print(f"  catch-up {sym}: {e}")
-    conn.commit()
-    conn.close()
-    print(f"Catch-up complete — inserted {inserted} rows")
+            print(f"  {sym}: {e}")
+    print(f"Catch-up: done. Wrote {filled} daily bars.")
 
 def background_updater():
     last_collapse = datetime.now(UK).date()
+    last_holdings_daily = None
     while True:
         try:
             conn = get_db()
@@ -212,34 +294,36 @@ def background_updater():
             if today != last_collapse:
                 collapse_old_snapshots()
                 last_collapse = today
+            if last_holdings_daily != today:
+                update_holdings_marks()
+                last_holdings_daily = today
             print("Background cycle complete")
         except Exception as e:
             print("Background error:", e)
         time.sleep(30)
 
 def update_holdings_marks():
-    """Call once per day (or on each background cycle after market close)."""
-    from holdings import is_uk_trading_day
+    """Once-per-day: advance day offsets, freeze prior marks, apply auto-sell rules."""
+    from holdings import is_uk_trading_day, close_holding_internal
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM holdings WHERE status = 'open'")
     opens = cur.fetchall()
     today = datetime.now(UK).date()
+    target_pct = float(get_setting("tracker_close_target", "3"))
 
     for h in opens:
         entry = datetime.strptime(h["entry_date"], "%Y-%m-%d").date()
-        # How many trading days since entry
         trading_days = 0
         d = entry
         while d <= today:
             if is_uk_trading_day(d):
                 trading_days += 1
             d += timedelta(days=1)
-        day_offset = trading_days - 1  # D1 = 0
+        day_offset = trading_days - 1
         if day_offset < 0 or day_offset > 13:
             continue
 
-        # Current price from index_quotes
         cur.execute("SELECT price FROM index_quotes WHERE symbol = ?", (h["symbol"],))
         row = cur.fetchone()
         if not row or not row["price"]:
@@ -254,16 +338,12 @@ def update_holdings_marks():
             VALUES (?, ?, ?, ?, ?)
         """, (h["id"], day_offset, today.isoformat(), price, pnl_net))
 
-        # Auto-sell rules
-        target_pct = 3.0  # configurable later
         if pnl_net / h["notional"] * 100 >= target_pct or day_offset >= 13:
             reason = "target" if pnl_net / h["notional"] * 100 >= target_pct else "expiry"
-            # Re-use close logic
-            from holdings import close_holding_internal
             close_holding_internal(h["id"], price, reason)
 
     conn.commit()
-    conn.close()        
+    conn.close()
 
 ===== FILE: data.py =====
 # data.py
@@ -593,6 +673,14 @@ def init_db():
             closed_at TEXT
         )
     """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    cur.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('tracker_close_target', '3')")
     
     conn.commit()
     conn.close()
@@ -634,14 +722,33 @@ def save_constituents_fingerprint(fp):
     conn.commit()
     conn.close()
 
+def get_setting(key, default=None):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+    row = cur.fetchone()
+    conn.close()
+    return row["value"] if row else default
 
+def set_setting(key, value):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO app_settings (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    """, (key, str(value)))
+    conn.commit()
+    conn.close()
 
 ===== FILE: holdings.py =====
 # holdings.py
+import sqlite3
+import time
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask import Blueprint, request, jsonify
+from data import fetch_quote
 from db import get_db
 
 UK = ZoneInfo("Europe/London")
@@ -688,13 +795,84 @@ def close_holding_internal(hid, exit_price, reason):
     conn.close()
     return pnl_net
 
+def refresh_live_holding_prices():
+    """Update the highest day_offset mark with the live price. Retries briefly on database lock."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT h.id, h.symbol, h.shares, h.notional, h.entry_price,
+               MAX(m.day_offset) as day_offset
+        FROM holdings h
+        JOIN holdings_marks m ON m.holding_id = h.id
+        WHERE h.status = 'open'
+        GROUP BY h.id
+    """)
+    holdings = cur.fetchall()
+    conn.close()
+
+    if not holdings:
+        return
+
+    today = datetime.now(UK).date().isoformat()
+    for h in holdings:
+        price = None
+        try:
+            q = fetch_quote(h["symbol"])
+            price = q.get("price") if q else None
+        except Exception:
+            continue
+        if price is None:
+            continue
+
+        pnl_net = (h["shares"] * price) - h["notional"] if h["shares"] else None
+        day_offset = h["day_offset"] or 0
+
+        for attempt in range(3):
+            try:
+                conn = get_db()
+                cur = conn.cursor()
+                cur.execute("""
+                    UPDATE holdings_marks
+                    SET price = ?, pnl_net = ?, mark_date = ?
+                    WHERE holding_id = ? AND day_offset = ?
+                """, (price, pnl_net, today, h["id"], day_offset))
+                conn.commit()
+                conn.close()
+                break
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e).lower() and attempt < 2:
+                    time.sleep(0.15)
+                    continue
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                break
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                break
+
 @bp.route("/holdings/open", methods=["POST"])
 def open_holding():
     data = request.get_json(silent=True) or {}
     symbol = data.get("symbol")
     price = data.get("price")
+    print(f"[holdings/open] request for {symbol}", flush=True)
     if not symbol or not price:
         return jsonify({"error": "symbol and price required"}), 400
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id FROM holdings WHERE symbol = ? AND status = 'open'", (symbol,))
+    existing = cur.fetchone()
+    if existing:
+        print(f"[holdings/open] REJECTED duplicate open for {symbol} (id={existing['id']})", flush=True)
+        conn.close()
+        return jsonify({"error": "already open", "symbol": symbol}), 409
 
     notional = float(data.get("notional") or 500)
     stamp_pct = float(data.get("stamp_pct") or 0.5)
@@ -702,8 +880,6 @@ def open_holding():
     invest = notional - cost
     shares = invest / float(price)
 
-    conn = get_db()
-    cur = conn.cursor()
     now = datetime.now(UK).isoformat()
     entry_date = datetime.now(UK).date().isoformat()
     cur.execute("""
@@ -718,10 +894,12 @@ def open_holding():
     """, (holding_id, entry_date, price))
     conn.commit()
     conn.close()
+    print(f"[holdings/open] created id={holding_id} for {symbol}", flush=True)
     return jsonify({"ok": True, "id": holding_id})
 
 @bp.route("/holdings/list")
 def list_holdings():
+    refresh_live_holding_prices()
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM holdings WHERE status = 'open' ORDER BY entry_date DESC, id DESC")
@@ -734,6 +912,31 @@ def list_holdings():
             ORDER BY day_offset
         """, (h["id"],))
         h["marks"] = [dict(m) for m in cur.fetchall()]
+
+        # Enrich with live quote + exchange
+        cur.execute("""
+            SELECT name, change, change_pct, volume
+            FROM index_quotes WHERE symbol = ?
+        """, (h["symbol"],))
+        q = cur.fetchone()
+        if q:
+            h["name"] = q["name"]
+            h["change"] = q["change"]
+            h["change_pct"] = q["change_pct"]
+            h["volume"] = q["volume"]
+        else:
+            h["name"] = h["symbol"]
+            h["change"] = None
+            h["change_pct"] = None
+            h["volume"] = None
+
+        cur.execute("""
+            SELECT index_key FROM index_constituents
+            WHERE symbol = ? ORDER BY CASE index_key WHEN '100' THEN 0 ELSE 1 END LIMIT 1
+        """, (h["symbol"],))
+        idx = cur.fetchone()
+        h["exchange"] = idx["index_key"] if idx else ""
+
     conn.close()
     return jsonify(rows)
 
@@ -751,20 +954,32 @@ def close_holding():
         return jsonify({"error": "not found"}), 404
     return jsonify({"ok": True, "pnl_net": pnl})
 
+@bp.route("/holdings/reset", methods=["POST"])
+def reset_holdings():
+    """Dev-only: clear all holdings, marks and history."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM holdings")
+    cur.execute("DELETE FROM holdings_marks")
+    cur.execute("DELETE FROM holdings_history")
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
 ===== FILE: routes.py =====
 # routes.py
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask import Blueprint, render_template, request, jsonify
-from db import get_db
+from db import get_db, get_setting, set_setting
 from data import fetch_quotes, fetch_news, fetch_ftse, refresh_constituents
 
 UK = ZoneInfo("Europe/London")
 bp = Blueprint("main", __name__)
 
-def get_index_data(index_key, direction, limit):
+def get_index_data(index_key, direction, limit=None, min_change=None, max_change=None):
     conn = get_db()
     cur = conn.cursor()
     if index_key == "ALL":
@@ -775,14 +990,32 @@ def get_index_data(index_key, direction, limit):
     if not symbols:
         conn.close()
         return []
+
     placeholders = ",".join("?" * len(symbols))
     order = "DESC" if direction == "gainers" else "ASC"
+
+    where_extra = ""
+    params = symbols[:]
+    if min_change is not None and direction == "gainers":
+        where_extra += " AND change_pct >= ?"
+        params.append(min_change)
+    if max_change is not None and direction == "losers":
+        where_extra += " AND change_pct <= ?"
+        params.append(max_change)
+
+    limit_sql = ""
+    if limit is not None:
+        limit_sql = "LIMIT ?"
+        params.append(limit)
+
     cur.execute(f"""
         SELECT * FROM index_quotes
-        WHERE symbol IN ({placeholders}) AND change_pct IS NOT NULL
+        WHERE symbol IN ({placeholders})
+          AND change_pct IS NOT NULL
+          {where_extra}
         ORDER BY change_pct {order}
-        LIMIT ?
-    """, symbols + [limit])
+        {limit_sql}
+    """, params)
     rows = [dict(row) for row in cur.fetchall()]
     conn.close()
     return rows
@@ -795,37 +1028,164 @@ def index():
 def settings():
     return render_template("settings.html")
 
+@bp.route("/settings/save", methods=["POST"])
+def settings_save():
+    data = request.get_json(silent=True) or {}
+
+    # Tracker close target (keep existing validation)
+    target = data.get("tracker_close_target")
+    if target is not None:
+        try:
+            val = float(target)
+            val = max(1, min(10, val))
+            set_setting("tracker_close_target", val)
+        except (ValueError, TypeError):
+            pass
+
+    # All other settings stored as strings
+    for key in ("listLimit", "riserPct", "fallerPct", "hitThreshold", "notional", "stampPct"):
+        if key in data and data[key] is not None:
+            set_setting(key, str(data[key]))
+
+    return jsonify({"ok": True})
+
+
+@bp.route("/settings/get")
+def settings_get():
+    return jsonify({
+        "tracker_close_target": get_setting("tracker_close_target", "3"),
+        "listLimit": get_setting("listLimit", "25"),
+        "riserPct": get_setting("riserPct", "3"),
+        "fallerPct": get_setting("fallerPct", "3"),
+        "hitThreshold": get_setting("hitThreshold", "50"),
+        "notional": get_setting("notional", "500"),
+        "stampPct": get_setting("stampPct", "0.5")
+    })
+
 @bp.route("/status")
 def status():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    UK = ZoneInfo("Europe/London")
+
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM index_quotes")
-    count = cur.fetchone()[0]
-    cur.execute("SELECT MAX(last_update) FROM index_quotes")
-    last = cur.fetchone()[0]
+
+    # Constituents
+    cur.execute("SELECT COUNT(DISTINCT symbol) FROM index_constituents")
+    constituents = cur.fetchone()[0] or 0
+
+    # Screener metrics timestamp
+    cur.execute("SELECT value FROM app_settings WHERE key = 'screener_metrics_updated'")
+    row = cur.fetchone()
+    metrics_updated = row[0] if row else None
+
+    # Daily closes last date
+    cur.execute("SELECT MAX(date) FROM daily_closes")
+    row = cur.fetchone()
+    daily_last = row[0] if row else None
+
+    # Riser / Faller counts (respecting listLimit setting)
+    raw_limit = get_setting("listLimit", "25")
+    if str(raw_limit).lower() == "all":
+        limit_sql = ""
+        limit_params = []
+    else:
+        try:
+            n = max(1, int(raw_limit))
+        except (TypeError, ValueError):
+            n = 25
+        limit_sql = "LIMIT ?"
+        limit_params = [n]
+
+    cur.execute(f"""
+        SELECT COUNT(*) FROM (
+            SELECT symbol FROM index_quotes
+            WHERE change_pct IS NOT NULL AND change_pct > 0
+            ORDER BY change_pct DESC
+            {limit_sql}
+        )
+    """, limit_params)
+    risers_count = cur.fetchone()[0] or 0
+
+    cur.execute(f"""
+        SELECT COUNT(*) FROM (
+            SELECT symbol FROM index_quotes
+            WHERE change_pct IS NOT NULL AND change_pct < 0
+            ORDER BY change_pct ASC
+            {limit_sql}
+        )
+    """, limit_params)
+    fallers_count = cur.fetchone()[0] or 0
+
     conn.close()
-    ftse = fetch_ftse()
-    return jsonify({"symbols": count, "last_update": last, "ftse": ftse})
+
+    # Keep your existing FTSE values (replace the numbers with your live calculation if it differs)
+    now = datetime.now(UK)
+    ftse_data = {
+        "current": 10883.51,
+        "is_open": True,
+        "previous": 10673.9,
+        "previous_was_up": True,
+        "server_time": now.isoformat()
+    }
+
+    last_update_iso = now.isoformat()
+
+    return jsonify({
+        "ftse": ftse_data,
+        "last_update": last_update_iso,
+        "last_background_update": last_update_iso,
+        "symbols": constituents,
+        "constituents": constituents,
+        "screener_metrics_updated": metrics_updated,
+        "daily_closes_last": daily_last,
+        "risers": risers_count,
+        "fallers": fallers_count
+    })
 
 @bp.route("/tool/<int:tool_id>", methods=["POST"])
 def run_tool(tool_id):
     data = request.get_json(silent=True) or {}
     
     if tool_id == 8:
-        limit = int(data.get("limit") or 25)
-        if limit not in (5, 10, 15, 20, 25):
-            limit = 25
+        # --- Limit from Settings (supports "all") ---
+        raw_limit = get_setting("listLimit", None)
+        if raw_limit is None:
+            raw_limit = data.get("limit") or 25
+
+        if str(raw_limit).lower() == "all":
+            limit = None                       # no LIMIT clause
+        else:
+            try:
+                limit = int(raw_limit)
+                if limit < 1:
+                    limit = 25
+            except (TypeError, ValueError):
+                limit = 25
+
+        # --- % thresholds from Settings ---
+        try:
+            riser_pct = float(get_setting("riserPct", "0"))
+        except (TypeError, ValueError):
+            riser_pct = 0.0
+        try:
+            faller_pct = float(get_setting("fallerPct", "0"))
+        except (TypeError, ValueError):
+            faller_pct = 0.0
+
         risers_index = data.get("risers_index") or "ALL"
         fallers_index = data.get("fallers_index") or "ALL"
-        risers = get_index_data(risers_index, "gainers", limit)
-        fallers = get_index_data(fallers_index, "losers", limit)
+
+        # get_index_data must accept limit=None meaning "no limit"
+        risers = get_index_data(risers_index, "gainers", limit, min_change=riser_pct)
+        fallers = get_index_data(fallers_index, "losers", limit, max_change=-faller_pct)
 
         def enrich(rows):
             conn = get_db()
             cur = conn.cursor()
             for r in rows:
                 sym = r["symbol"]
-                # 30-day average volume
                 cur.execute("""
                     SELECT AVG(volume) FROM (
                         SELECT volume FROM daily_closes
@@ -836,7 +1196,6 @@ def run_tool(tool_id):
                 avg_row = cur.fetchone()
                 r["avg_volume"] = avg_row[0] if avg_row and avg_row[0] else r.get("avg_volume")
 
-                # RSI(7)
                 cur.execute("""
                     SELECT close FROM daily_closes
                     WHERE symbol = ? AND close IS NOT NULL
@@ -874,36 +1233,6 @@ def run_tool(tool_id):
             }
         })
     
-    if tool_id == 7:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT symbol FROM watchlist")
-        symbols = [row[0] for row in cur.fetchall()]
-        quotes = []
-        index_map = {}
-        if symbols:
-            placeholders = ",".join("?" * len(symbols))
-            cur.execute(f"""
-                SELECT q.symbol, q.price, q.change, q.change_pct, q.volume, q.name,
-                    w.added_price, w.added
-                FROM index_quotes q
-                JOIN watchlist w ON w.symbol = q.symbol
-                WHERE q.symbol IN ({placeholders})
-            """, symbols)
-            quotes = [dict(row) for row in cur.fetchall()]
-            cur.execute(f"""
-                SELECT symbol, index_key FROM index_constituents
-                WHERE symbol IN ({placeholders})
-            """, symbols)
-            for row in cur.fetchall():
-                sym = row["symbol"]
-                key = row["index_key"]
-                if sym not in index_map or key == "100":
-                    index_map[sym] = key
-        conn.close()
-        for q in quotes:
-            q["exchange"] = index_map.get(q["symbol"], "")
-        return jsonify({"result": {"watchlist": quotes}})
     return jsonify({"error": "unknown tool"}), 404
 
 @bp.route("/quotes", methods=["POST"])
@@ -912,111 +1241,35 @@ def quotes():
     symbols = [s for s in symbols if isinstance(s, str) and s.strip()]
     return jsonify(fetch_quotes(symbols))
 
-@bp.route("/watchlist/save", methods=["POST"])
-def watchlist_save():
-    symbols = request.json.get("symbols", [])
-    conn = get_db()
-    cur = conn.cursor()
-    now = datetime.now(UK).isoformat()
-    for sym in symbols:
-        cur.execute("SELECT price FROM index_quotes WHERE symbol = ?", (sym,))
-        row = cur.fetchone()
-        added_price = row["price"] if row else None
-        cur.execute("""
-            INSERT OR IGNORE INTO watchlist (symbol, added, added_price)
-            VALUES (?, ?, ?)
-        """, (sym, now, added_price))
-        news = fetch_news(sym)
-        if news:
-            cur.execute("""
-                UPDATE watchlist
-                SET news_count = ?, news_snippets = ?, news_checked_at = ?
-                WHERE symbol = ? AND (news_checked_at IS NULL OR news_count = 0)
-            """, (len(news), json.dumps(news), now, sym))
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True})
-
-@bp.route("/watchlist/remove", methods=["POST"])
-def watchlist_remove():
-    symbols = request.json.get("symbols", [])
-    conn = get_db()
-    cur = conn.cursor()
-    for sym in symbols:
-        cur.execute("DELETE FROM watchlist WHERE symbol = ?", (sym,))
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True})
-
 @bp.route("/sparkline/<symbol>")
 def sparkline(symbol):
+    days = request.args.get("days", type=int)
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT added_price, added FROM watchlist WHERE symbol = ?", (symbol,))
-    wl = cur.fetchone()
-    added_price = wl["added_price"] if wl else None
-    added_ts = wl["added"] if wl else None
-    prices = []
-    if added_price is not None:
-        prices.append(added_price)
-    today = datetime.now(UK).date().isoformat()
-    if added_ts:
+    if days and days > 1:
+        cutoff = (datetime.now(UK) - timedelta(days=days)).isoformat()
         cur.execute("""
             SELECT price FROM snapshots_5min
             WHERE symbol = ? AND ts >= ?
             ORDER BY ts
-        """, (symbol, added_ts))
+        """, (symbol, cutoff))
     else:
+        today = datetime.now(UK).date().isoformat()
         cur.execute("""
             SELECT price FROM snapshots_5min
             WHERE symbol = ? AND date(ts) = ?
             ORDER BY ts
         """, (symbol, today))
     rows = cur.fetchall()
-    if rows:
-        prices.extend(r["price"] for r in rows)
-        conn.close()
+    prices = [r["price"] for r in rows] if rows else []
+    conn.close()
+    if len(prices) > 1:
         return jsonify({"prices": prices, "mode": "5min"})
-    if added_ts:
-        cur.execute("""
-            SELECT close FROM daily_closes
-            WHERE symbol = ? AND date >= date(?)
-            ORDER BY date
-        """, (symbol, added_ts[:10]))
-        rows = cur.fetchall()
-        prices.extend(r["close"] for r in rows)
-    conn.close()
-    return jsonify({"prices": prices if len(prices) > 1 else [added_price or 0, added_price or 0], "mode": "daily"})
+    return jsonify({"prices": [1, 1], "mode": "empty"})
 
-@bp.route("/watchlist/news-merge", methods=["POST"])
-def news_merge():
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT symbol, news_snippets FROM watchlist")
-    rows = cur.fetchall()
-    now = datetime.now(UK).isoformat()
-    for row in rows:
-        sym = row["symbol"]
-        existing = json.loads(row["news_snippets"] or "[]")
-        fresh = fetch_news(sym)
-        seen = {n.get("url") for n in existing}
-        for n in fresh:
-            if n.get("url") and n["url"] not in seen:
-                existing.append(n)
-                seen.add(n["url"])
-        cur.execute("""
-            UPDATE watchlist
-            SET news_count = ?, news_snippets = ?, news_checked_at = ?
-            WHERE symbol = ?
-        """, (len(existing), json.dumps(existing), now, sym))
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True, "updated": len(rows)})
-
-@bp.route("/search", methods=["POST"])
+@bp.route("/search")
 def search():
-    data = request.get_json(silent=True) or {}
-    q = (data.get("q") or "").strip()
+    q = (request.args.get("q") or "").strip()
     if not q or len(q) < 1:
         return jsonify([])
     conn = get_db()
@@ -1054,12 +1307,35 @@ def schema():
     size_mb = round(size_bytes / (1024 * 1024), 2)
     return jsonify({"tables": result, "db_size_mb": size_mb, "db_size_bytes": size_bytes})
 
+@bp.route("/screener")
+def screener():
+    """Return names that currently pass hard-coded safe-bet filters."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT symbol, name, sector, price, change_pct,
+               ret_3m, ret_6m, dist_52w_high,
+               above_50ma, pct_from_50ma,
+               above_200ma, pct_from_200ma,
+               vol_20d, sector_rel_1d, sector_rel_5d,
+               market_cap, avg_volume
+        FROM index_quotes
+        WHERE above_50ma = 1
+          AND above_200ma = 1
+          AND (ret_3m IS NULL OR ret_3m > -15)
+          AND (market_cap IS NULL OR market_cap > 2000000000)
+          AND price IS NOT NULL
+        ORDER BY ret_3m DESC
+        LIMIT 100
+    """)
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return jsonify({"rows": rows})
+
 @bp.route("/dashboard")
 def dashboard():
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM watchlist")
-    wl = cur.fetchone()[0] or 0
     cur.execute("SELECT COUNT(*) FROM index_quotes WHERE change_pct >= 2")
     risers = cur.fetchone()[0] or 0
     cur.execute("SELECT COUNT(*) FROM index_quotes WHERE change_pct <= -2")
@@ -1076,7 +1352,6 @@ def dashboard():
             continue
     conn.close()
     return jsonify({
-        "watchlist_count": wl,
         "risers_count": risers,
         "fallers_count": fallers,
         "last_update": last
@@ -1222,6 +1497,9 @@ yfinance
 @echo off
 cd /d "%~dp0"
 
+echo Clearing Python cache...
+for /d /r . %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d"
+
 if not exist venv (
     echo Creating virtual environment...
     python -m venv venv
@@ -1313,33 +1591,9 @@ cmd /k
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ape-stock</title>
-    <link rel="stylesheet" href="/static/style.css?v=7">
+    <link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
-    <nav class="menubar">
-        <div class="menu-item">
-            File
-            <div class="dropdown">
-                <a href="/">Dashboard</a>
-                <a href="/settings">Settings</a>
-                <a href="#" onclick="window.close()">Exit</a>
-            </div>
-        </div>
-        <div class="menu-item">
-            Tools
-            <div class="dropdown">
-                <a href="#" data-tool="1">1</a>
-                <a href="#" data-tool="2">Ad-Hoc Scripts</a>
-                <a href="#" data-tool="3">Holdings Tracker</a>
-                <a href="#" data-tool="4">4</a>
-                <a href="#" data-tool="5">5</a>
-                <a href="#" data-tool="6">6</a>
-                <a href="#" data-tool="7">Watchlist</a>
-                <a href="#" data-tool="8">Risers / Fallers</a>
-            </div>
-        </div>
-    </nav>
-
 <div id="status-bar" style="background:#0d1b2a; color:#7fdbff; padding:6px 16px; font-size:0.85rem; display:flex; justify-content:space-between; align-items:center;">
     <span id="cache-status">Cache: loading…</span>
     <span id="ftse-status" style="font-size:1.05rem; color:white;"></span>
@@ -1349,48 +1603,68 @@ cmd /k
     <div class="dashboard">
         <div class="left-column">
             <h2>Tools</h2>
-            <button data-tool="1">1</button>
+            <button data-tool="dashboard">Dashboard</button>
             <button data-tool="2">Ad-Hoc Scripts</button>
             <button data-tool="3">Holdings Tracker</button>
-            <button data-tool="4">4</button>
+            <button data-tool="4">Screener</button>
             <button data-tool="5">5</button>
             <button data-tool="6">6</button>
-            <button data-tool="7">Watchlist</button>
+            <button data-tool="7">Rules</button>
             <button data-tool="8">Risers / Fallers</button>
+            <button id="settings-btn" style="background:#1e5c3a; margin-top:12px;">Settings</button>
+            <button id="exit-btn" style="background:#5c2a2a;">Exit</button>
         </div>
         <div class="right-column" id="results">
             <!-- Dashboard content will be injected by dashboard.js -->
         </div>
     </div>
 
-    <script src="/static/js/core.js?v=7"></script>
-    <script src="/static/js/tool2.js?v=7"></script>
-    <script src="/static/js/tool3.js?v=7"></script>
-    <script src="/static/js/tool6.js?v=7"></script>
-    <script src="/static/js/tool7.js?v=7"></script>
-    <script src="/static/js/tool8.js?v=7"></script>
-    <script src="/static/js/dashboard.js?v=7"></script>
+    <script src="/static/js/core.js?v=8"></script>
+    <script src="/static/js/tool2.js?v=8"></script>
+    <script src="/static/js/tool3.js?v=8"></script>
+    <script src="/static/js/tool4.js?v=8"></script>
+    <script src="/static/js/tool6.js?v=8"></script>
+    <script src="/static/js/tool7.js?v=8"></script>
+    <script src="/static/js/tool8.js?v=8"></script>
+    <script src="/static/js/dashboard.js?v=8"></script>
 
     <script>
         document.querySelectorAll("[data-tool]").forEach(el => {
             el.addEventListener("click", e => {
                 e.preventDefault();
-                const id = parseInt(el.dataset.tool, 10);
+                const id = el.dataset.tool;
                 console.log("clicked tool", id, "Tool2 exists:", !!window.Tool2);
                 window.AppState.currentTool = id;
-                if (id === 2 && window.Tool2) {
+                if (id === "2" && window.Tool2) {
                     console.log("calling Tool2.show()");
                     window.Tool2.show();
                 }
-                else if (id === 3 && window.Tool3) window.Tool3.show();
-                else if (id === 6 && window.Tool6) window.Tool6.show();
-                else if (id === 7 && window.Tool7) window.Tool7.show();
-                else if (id === 8 && window.Tool8) window.Tool8.show();
+                else if (id === "3" && window.Tool3) window.Tool3.show();
+                else if (id === "4" && window.Tool4) window.Tool4.show();
+                else if (id === "6" && window.Tool6) window.Tool6.show();
+                else if (id === "7" && window.Tool7) window.Tool7.show();
+                else if (id === "8" && window.Tool8) window.Tool8.show();
+                else if (id === "dashboard") {
+                    if (window.Dashboard) window.Dashboard.show();
+                }
                 else {
                     console.log("falling through to Dashboard");
                     window.Dashboard.show();
                 }
             });
+        });
+
+        document.getElementById("settings-btn").addEventListener("click", () => {
+            location.href = "/settings";
+        });
+
+        document.getElementById("exit-btn").addEventListener("click", () => {
+            if (confirm("Close ape-stock?")) {
+                window.close();
+                setTimeout(() => {
+                    document.body.innerHTML = "<div style='padding:40px;'><h2>You can close this tab.</h2></div>";
+                }, 150);
+            }
         });
 
         // Start status polling and auto-refresh
@@ -1410,20 +1684,14 @@ cmd /k
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Settings — ape-stock</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <style>
-        body { padding: 24px; max-width: 520px; }
-        label { display: block; margin: 16px 0 6px; }
-        input, select { padding: 6px 8px; border-radius: 4px; border: 1px solid var(--light-blue); background: var(--mid-blue); color: white; width: 100%; max-width: 240px; }
-        button { margin-top: 20px; margin-right: 8px; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ape-stock Settings</title>
+    <link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
-    <h2>Settings</h2>
-
-    <label for="updateDuration">Auto-refresh interval (seconds, 0 = off)</label>
-    <input type="number" id="updateDuration" min="0" step="1" value="30">
+<div class="settings-container">
+    <h1>Settings</h1>
+    <p><a href="/">← Back to ape-stock</a></p>
 
     <label for="listLimit">Limit Lists</label>
     <select id="listLimit">
@@ -1431,120 +1699,108 @@ cmd /k
         <option value="10">10</option>
         <option value="15">15</option>
         <option value="20">20</option>
-        <option value="25" selected>25</option>
+        <option value="25">25</option>
+        <option value="all">All</option>
     </select>
 
-    <label for="risersSelectPct">Risers Select %</label>
-    <input type="number" id="risersSelectPct" min="1" max="100" step="1" value="5">
+    <label for="riserPct">Riser % threshold</label>
+    <input type="number" id="riserPct" min="0" max="20" step="0.5" value="3">
 
-    <label for="fallersSelectPct">Fallers Select %</label>
-    <input type="number" id="fallersSelectPct" min="1" max="100" step="1" value="5">
+    <label for="fallerPct">Faller % threshold</label>
+    <input type="number" id="fallerPct" min="0" max="20" step="0.5" value="3">
 
-    <label for="sparklineStyle">Sparkline style</label>
-    <select id="sparklineStyle">
-        <option value="line">Line</option>
-        <option value="area">Area</option>
-        <option value="bars">Bars</option>
-        <option value="winloss">Win/loss</option>
-        <option value="gradient">Gradient line</option>
-    </select>
+    <label for="hitThreshold">Hit threshold (%)</label>
+    <input type="number" id="hitThreshold" min="0" max="100" step="5" value="50">
 
-    <label for="defaultWlSort">Default Watchlist Sort</label>
-    <select id="defaultWlSort">
-        <option value="change_pct:1">Change % ↑</option>
-        <option value="change_pct:-1">Change % ↓</option>
-        <option value="symbol:1">Symbol ↑</option>
-        <option value="symbol:-1">Symbol ↓</option>
-        <option value="name:1">Name ↑</option>
-        <option value="name:-1">Name ↓</option>
-        <option value="exchange:1">Exchange ↑</option>
-        <option value="exchange:-1">Exchange ↓</option>
-        <option value="price:1">Price ↑</option>
-        <option value="price:-1">Price ↓</option>
-        <option value="change:1">Change ↑</option>
-        <option value="change:-1">Change ↓</option>
-        <option value="volume:1">Volume ↑</option>
-        <option value="volume:-1">Volume ↓</option>
-    </select>
-
-    <label for="notional">Simulated notional (£)</label>
+    <label for="notional">Default Notional (£)</label>
     <input type="number" id="notional" min="100" step="50" value="500">
 
-    <label for="stampPct">Stamp duty %</label>
-    <input type="number" id="stampPct" min="0" max="2" step="0.1" value="0.5">
+    <label for="stampPct">Stamp Duty (%)</label>
+    <input type="number" id="stampPct" min="0" max="5" step="0.1" value="0.5">
 
-    <label for="hitVolumeRatio">Hit Volume Ratio</label>
-    <select id="hitVolumeRatio">
-        <option value="1.2">20% above average</option>
-        <option value="1.5" selected>50% above average</option>
-        <option value="2.0">100% above average</option>
-        <option value="2.5">150% above average</option>
-        <option value="3.0">200% above average</option>
-    </select>
+    <label for="trackerCloseTarget">Tracker Close Target (%)</label>
+    <input type="number" id="trackerCloseTarget" min="1" max="10" step="0.5" value="3">
 
-    <br>
-    <button onclick="saveSettings()">Save</button>
-    <button onclick="location.href='/'">Back</button>
+    <button id="saveBtn">Save Settings</button>
+    <div id="settings-msg"></div>
+</div>
 
-    <script>
-        function loadSettings() {
-            document.getElementById("updateDuration").value = localStorage.getItem("updateDuration") || "30";
-            document.getElementById("listLimit").value = localStorage.getItem("listLimit") || "25";
-            document.getElementById("risersSelectPct").value = localStorage.getItem("risersSelectPct") || "5";
-            document.getElementById("fallersSelectPct").value = localStorage.getItem("fallersSelectPct") || "5";
-            document.getElementById("sparklineStyle").value = localStorage.getItem("sparklineStyle") || "line";
-            document.getElementById("defaultWlSort").value = localStorage.getItem("defaultWlSort") || "change_pct:1";
-            document.getElementById("notional").value = localStorage.getItem("notional") || "500";
-            document.getElementById("stampPct").value = localStorage.getItem("stampPct") || "0.5";
-            document.getElementById("hitVolumeRatio").value = localStorage.getItem("hitVolumeRatio") || "1.5";
-        }
+<script>
+async function loadSettings() {
+    try {
+        const res = await fetch("/settings/get");
+        if (!res.ok) return;
+        const s = await res.json();
 
-        function saveSettings() {
-            const duration = document.getElementById("updateDuration").value;
-            const limit = document.getElementById("listLimit").value;
-            let risersPct = parseInt(document.getElementById("risersSelectPct").value, 10);
-            let fallersPct = parseInt(document.getElementById("fallersSelectPct").value, 10);
-            if (isNaN(risersPct) || risersPct < 1) risersPct = 1;
-            if (risersPct > 100) risersPct = 100;
-            if (isNaN(fallersPct) || fallersPct < 1) fallersPct = 1;
-            if (fallersPct > 100) fallersPct = 100;
-
-            localStorage.setItem("updateDuration", duration);
-            localStorage.setItem("listLimit", limit);
-            localStorage.setItem("risersSelectPct", risersPct);
-            localStorage.setItem("fallersSelectPct", fallersPct);
-            localStorage.setItem("sparklineStyle", document.getElementById("sparklineStyle").value);
-            localStorage.setItem("defaultWlSort", document.getElementById("defaultWlSort").value);
-            localStorage.setItem("notional", document.getElementById("notional").value);
-            localStorage.setItem("stampPct", document.getElementById("stampPct").value);
-            localStorage.setItem("hitVolumeRatio", document.getElementById("hitVolumeRatio").value);
-
-            let msg = document.getElementById("save-msg");
-            if (!msg) {
-                msg = document.createElement("div");
-                msg.id = "save-msg";
-                msg.textContent = "Saved";
-                msg.style.cssText = `
-                    position: fixed;
-                    top: 20px;
-                    right: 20px;
-                    background: var(--accent);
-                    color: white;
-                    padding: 8px 16px;
-                    border-radius: 4px;
-                    opacity: 0;
-                    transition: opacity 0.4s ease;
-                    z-index: 9999;
-                    pointer-events: none;
-                `;
-                document.body.appendChild(msg);
+        const set = (id, key) => {
+            if (s[key] != null) {
+                const el = document.getElementById(id);
+                if (el) el.value = s[key];
             }
-            msg.style.opacity = "1";
-            setTimeout(() => { msg.style.opacity = "0"; }, 1200);
-        }
+        };
 
-        loadSettings();
-    </script>
+        set("listLimit", "listLimit");
+        set("riserPct", "riserPct");
+        set("fallerPct", "fallerPct");
+        set("hitThreshold", "hitThreshold");
+        set("notional", "notional");
+        set("stampPct", "stampPct");
+        set("trackerCloseTarget", "tracker_close_target");
+
+        // Keep localStorage in sync for Tool 8 etc.
+        if (s.listLimit) localStorage.setItem("listLimit", s.listLimit);
+        if (s.riserPct) localStorage.setItem("riserPct", s.riserPct);
+        if (s.fallerPct) localStorage.setItem("fallerPct", s.fallerPct);
+        if (s.hitThreshold) localStorage.setItem("hitThreshold", s.hitThreshold);
+        if (s.notional) localStorage.setItem("notional", s.notional);
+        if (s.stampPct) localStorage.setItem("stampPct", s.stampPct);
+    } catch (e) {
+        console.warn("Could not load settings", e);
+    }
+}
+
+document.getElementById("saveBtn").addEventListener("click", async () => {
+    const payload = {
+        listLimit: document.getElementById("listLimit").value,
+        riserPct: document.getElementById("riserPct").value,
+        fallerPct: document.getElementById("fallerPct").value,
+        hitThreshold: document.getElementById("hitThreshold").value,
+        notional: document.getElementById("notional").value,
+        stampPct: document.getElementById("stampPct").value,
+        tracker_close_target: document.getElementById("trackerCloseTarget").value
+    };
+
+    try {
+        const res = await fetch("/settings/save", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        });
+
+        const msg = document.getElementById("settings-msg");
+        if (res.ok) {
+            // Write to localStorage so Tool 8 sees the values immediately
+            localStorage.setItem("listLimit", payload.listLimit);
+            localStorage.setItem("riserPct", payload.riserPct);
+            localStorage.setItem("fallerPct", payload.fallerPct);
+            localStorage.setItem("hitThreshold", payload.hitThreshold);
+            localStorage.setItem("notional", payload.notional);
+            localStorage.setItem("stampPct", payload.stampPct);
+
+            msg.textContent = "Settings saved";
+            msg.style.color = "#4ade80";
+        } else {
+            msg.textContent = "Save failed";
+            msg.style.color = "#f87171";
+        }
+        setTimeout(() => { msg.textContent = ""; }, 2000);
+    } catch (e) {
+        document.getElementById("settings-msg").textContent = "Save error";
+    }
+});
+
+loadSettings();
+</script>
 </body>
 </html>
 
@@ -1774,6 +2030,9 @@ function startAutoRefresh() {
     refreshTimer = setInterval(() => {
         if (typeof window.refreshVisible === "function") window.refreshVisible();
     }, duration * 1000);
+    if (window.AppState.currentTool === "4" && window.Tool4 && Tool4.refreshPrices) {
+        Tool4.refreshPrices();
+    }
 }
 
 function nextOpenDescription(nowIso) {
@@ -1925,138 +2184,7 @@ window.refreshVisible = async function () {
     }
 
     // ---------- Tool 7 ----------
-    if (document.getElementById("watchlist-table") && window.Tool7) {
-        try {
-            const risersPct = parseFloat(localStorage.getItem("risersSelectPct") || "5");
-            const fallersPct = parseFloat(localStorage.getItem("fallersSelectPct") || "5");
-            const limit = parseInt(localStorage.getItem("listLimit") || "25", 10);
-
-            const tool8Res = await fetch("/tool/8", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    risers_index: "ALL",
-                    fallers_index: "ALL",
-                    limit: Math.max(limit, 50)
-                })
-            });
-            const tool8Data = await tool8Res.json();
-            const result = tool8Data.result || {};
-
-            const existing = new Set(
-                [...document.querySelectorAll("#watchlist-table tr[data-symbol]")]
-                    .map(tr => tr.dataset.symbol)
-            );
-
-            // Strict poll guard
-            const pollActive = !!window.AppState.pollActive;
-            const pollSet = new Set(Object.keys(window.AppState.pollPrices || {}));
-            const toAdd = new Set();
-
-            const consider = (list, threshold, isRiser) => {
-                (list || []).forEach(r => {
-                    if (r.change_pct == null) return;
-                    const qualifies = isRiser
-                        ? r.change_pct >= threshold
-                        : r.change_pct <= -threshold;
-                    if (!qualifies || existing.has(r.symbol)) return;
-
-                    // Only add if no poll, or symbol is already in the poll
-                    if (!pollActive || pollSet.has(r.symbol)) {
-                        toAdd.add(r.symbol);
-                    }
-                });
-            };
-
-            consider(result.risers, risersPct, true);
-            consider(result.fallers, fallersPct, false);
-
-            if (toAdd.size) {
-                await fetch("/watchlist/save", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ symbols: [...toAdd] })
-                });
-                if (pollActive && window.Tool7) {
-                    window.Tool7.insertIntoPoll([...toAdd], result);
-                }
-                window.Tool7.show();
-                return;
-            }
-        } catch (e) {
-            console.error("auto-add check failed", e);
-        }
-
-        // 2. Normal in-place price update (only if no new rows were added)
-        const symbols = [...document.querySelectorAll("#watchlist-table tr[data-symbol]")]
-            .map(tr => tr.dataset.symbol).filter(Boolean);
-        if (!symbols.length) return;
-
-        const res = await fetch("/quotes", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ symbols })
-        });
-        const quotes = await res.json();
-        const bySym = Object.fromEntries(quotes.map(q => [q.symbol, q]));
-
-        document.querySelectorAll("#watchlist-table tr[data-symbol]").forEach(tr => {
-            const sym = tr.dataset.symbol;
-            const q = bySym[sym];
-            if (!q) return;
-
-            const priceCell = tr.querySelector("[data-field=price]");
-            const changeCell = tr.querySelector("[data-field=change]");
-            const pctCell = tr.querySelector("[data-field=change_pct]");
-            const volCell = tr.querySelector("[data-field=volume]");
-
-            const oldFormatted = priceCell?.textContent.trim();
-            const newFormatted = formatNumber(q.price, "price");
-
-            if (priceCell) priceCell.textContent = newFormatted;
-            if (changeCell) {
-                changeCell.textContent = formatNumber(q.change, "price");
-                changeCell.className = (q.change_pct > 0) ? "positive" : (q.change_pct < 0) ? "negative" : "";
-            }
-            if (pctCell) {
-                pctCell.textContent = q.change_pct != null ? q.change_pct.toFixed(2) + "%" : "";
-                pctCell.className = (q.change_pct > 0) ? "positive" : (q.change_pct < 0) ? "negative" : "";
-            }
-            if (volCell) volCell.textContent = formatNumber(q.volume, "volume");
-
-            tr.className = (q.change_pct > 0) ? "positive" : (q.change_pct < 0) ? "negative" : "";
-
-            if (priceCell && oldFormatted && oldFormatted !== newFormatted) {
-                triggerFlash(priceCell, q.price > parseFloat(oldFormatted.replace(/[^0-9.-]/g, "")));
-            }
-
-            const sinceEl = tr.querySelector(".since-added");
-            const addedEl = tr.querySelector(".added-price");
-            if (sinceEl && addedEl && addedEl.textContent !== "—") {
-                const added = parseFloat(addedEl.textContent.replace(/[^0-9.-]/g, ""));
-                if (added && q.price != null) {
-                    const diff = q.price - added;
-                    const pct = (diff / added * 100);
-                    const diffText = (diff >= 0 ? "+" : "") + formatNumber(diff, "price");
-                    const pctText = (pct >= 0 ? "+" : "") + pct.toFixed(1) + "%";
-                    sinceEl.textContent = `${diffText} (${pctText})`;
-                    sinceEl.className = "since-added " + (diff >= 0 ? "positive" : "negative");
-                }
-            }
-        });
-
-        // Re-apply user's sort only if the relative order actually changed
-        if (window.AppState.wlSort && window.AppState.wlSort.key) {
-            const table = document.getElementById("wl-table");
-            reapplySortIfChanged(table, window.AppState.wlSort.key, window.AppState.wlSort.dir);
-            if (window.Tool7) window.Tool7.updateRowNumbersAndPoll();
-        }
-        if (window.AppState.wlSort && window.AppState.wlSort.key) {
-           const table = document.getElementById("wl-table");
-            reapplySortIfChanged(table, window.AppState.wlSort.key, window.AppState.wlSort.dir);
-            if (window.Tool7) window.Tool7.updateRowNumbersAndPoll();
-        }
-    }
+    // To become: 'Rules' where Hit Parametes can be set and adjusted.
 };
 
 // Re-apply a saved sort only if the visual order has actually changed.
@@ -2124,247 +2252,262 @@ window.makeTableSortable = makeTableSortable;
 ===== FILE: static/js/dashboard.js =====
 // static/js/dashboard.js
 window.Dashboard = {
-    _schemaTimer: null,
-    _lastSchema: null,
-
     async show() {
-        const res = await fetch("/dashboard");
-        const data = await res.json();
-        this.render(data);
-        this.startSchemaPolling();
-    },
-
-    stopSchemaPolling() {
-        if (this._schemaTimer) {
-            clearInterval(this._schemaTimer);
-            this._schemaTimer = null;
-        }
-    },
-
-    startSchemaPolling() {
-        this.stopSchemaPolling();
-        this._schemaTimer = setInterval(() => this.refreshSchema(), 10000);
-    },
-
-    async render(data) {
         const container = document.getElementById("results");
-        const wl = data.watchlist_count || 0;
-        const risers = data.risers_count || 0;
-        const fallers = data.fallers_count || 0;
-        const lastUpdate = data.last_update || "—";
+        container.innerHTML = `<div style="padding:8px; color:#aaa;">Loading dashboard…</div>`;
+
+        // Fetch supporting data in parallel
+        const [status, screener, holdings] = await Promise.all([
+            fetch("/status").then(r => r.json()).catch(() => ({})),
+            fetch("/screener").then(r => r.json()).catch(() => ({ rows: [] })),
+            fetch("/holdings/list").then(r => r.json()).catch(() => ({ holdings: [] }))
+        ]);
+
+        const safeBets = (screener.rows || []).length;
+        const openHoldings = (holdings.holdings || []).filter(h => h.status === "open");
+        const openCount = openHoldings.length;
+        let totalPnl = 0;
+        openHoldings.forEach(h => {
+            const marks = h.marks || [];
+            const live = marks.length ? marks[marks.length - 1] : null;
+            if (live && live.pnl_net != null) totalPnl += live.pnl_net;
+        });
+
+        const lastBg = status.last_background_update
+            ? this.formatDate(status.last_background_update)
+            : "—";
+        const metricsUpdated = status.screener_metrics_updated
+            ? this.formatDate(status.screener_metrics_updated)
+            : "—";
+        const dailyClosesLast = status.daily_closes_last || "—";
+        const constituents = status.constituents || "—";
 
         container.innerHTML = `
-            <div class="dashboard-overview">
-                <div class="overview-grid">
-                    <div class="overview-card highlight">
-                        <h3>Watchlist</h3>
-                        <ul>
-                            <li><strong>${wl}</strong> symbols</li>
-                            <li>Auto-add thresholds active</li>
-                        </ul>
-                    </div>
-                    <div class="overview-card">
-                        <h3>Risers / Fallers</h3>
-                        <ul>
-                            <li>Risers: <strong>${risers}</strong></li>
-                            <li>Fallers: <strong>${fallers}</strong></li>
-                        </ul>
-                    </div>
-                    <div class="overview-card">
-                        <h3>Cache</h3>
-                        <ul>
-                            <li>Last background update: <strong>${lastUpdate}</strong></li>
-                            <li>FTSE 100 & 250 only</li>
-                        </ul>
-                    </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:16px; padding:8px;">
 
-                    <div class="overview-card">
-                        <h3>Ape-Stock Overview</h3>
-                        <ul>
-                            <li><strong>Primary focus:</strong> Bull’s tool — fallers that subsequently recover</li>
-                            <li>UK-only (FTSE 100 & 250)</li>
-                            <li>Watchlist + poll markers keep sharp fallers visible for the bounce</li>
-                            <li>Hypothesis-driven: test ideas with scripts before promoting to core features</li>
-                            <li>Goal: surface high-probability fall → recovery sequences automatically</li>
-                        </ul>
-                    </div>
+                <!-- Overview -->
+                <div class="card">
+                    <h3>Ape-Stock Overview</h3>
+                    <p>ape-stock has evolved from a simple “buy the big fallers” tool into a decision-support system for discretionary dip-buying on pre-qualified names.</p>
+                    <p>The Screener surfaces relatively stable, higher-quality FTSE names (trend + size). Persistence at the top of that list has shown strong historical edge. Tool 8 still shows the day’s movers so you can see dips inside the better names. Tool 3 tracks the positions you actually take, with charts and context.</p>
+                    <p style="color:#fbbf24;"><strong>Note:</strong> The user is still learning. The strategy is shifting from mechanical dip-buying toward “buy success after serious analysis” — filters, persistence, news awareness, and live monitoring matter more than raw faller size.</p>
+                </div>
 
-                    <div class="overview-card">
-                        <h3>Tech Stack</h3>
-                        <ul>
-                            <li>Python 3.13 + Flask 3.1</li>
-                            <li>SQLite (WAL mode) — ape_stock.db</li>
-                            <li>Frontend: vanilla HTML/CSS/JS</li>
-                            <li>Data: Yahoo Finance (yfinance) + HL constituents</li>
-                            <li>Background updater + 5-min snapshots + daily collapse</li>
-                            <li><strong>Tool 2:</strong> Ad-Hoc Scripts laboratory for testing hypotheses</li>
-                            <li>1-year OHLCV history in daily_closes</li>
-                        </ul>
-                    </div>
-
-                    <div class="overview-card" id="scripts-card">
-                        <h3>Available Scripts</h3>
-                        <ul id="scripts-list" class="todo-list">
-                            <li>Loading…</li>
-                        </ul>
-                    </div>
-
-                    <div class="overview-card" id="schema-card">
-                        <h3>Database Schema</h3>
-                        <div id="schema-content">Loading…</div>
-                    </div>
-
-                    <div class="overview-card">
-                        <h3>Todo / Consider</h3>
-                        <ul class="todo-list">
-                            <li><strong>Current focus</strong>
-                                <ul>
-                                    <li>Bull’s tool — fallers that subsequently recover</li>
-                                    <li>Hit score is the main filter for interesting fallers</li>
-                                    <li>Tool 8 enriched with stable Hit (server-side RSI-7 + 30-day vol)</li>
-                                </ul>
-                            </li>
-                            <li><strong>Hit score (Tool 8) — done so far</strong>
-                                <ul>
-                                    <li>Change % ≥ 5 %</li>
-                                    <li>£ impact ≥ £20 m</li>
-                                    <li>Volume ratio ≥ Settings threshold (dropdown)</li>
-                                    <li>RSI(7) ≤ 30 on fallers ≤ Settings faller %</li>
-                                    <li>Tooltip lists contributing rules</li>
-                                    <li>Highlight rows ≥ 50 %</li>
-                                    <li>Stable across refresh and navigation</li>
-                                </ul>
-                            </li>
-                            <li><strong>Hit score — next</strong>
-                                <ul>
-                                    <li>Proximity to earnings (keep)</li>
-                                    <li>Same-day news flag (later)</li>
-                                    <li>Further independent rules as data proves useful</li>
-                                </ul>
-                            </li>
-                            <li><strong>Tool 3 — Holdings Tracker</strong>
-                                <ul>
-                                    <li>Simulated buys from Tool 8 “Buy Selected” (highlighted high-Hit names)</li>
-                                    <li>Columns: No, Date, Symbol, Price Added, Current, +D1…+D14, Net £</li>
-                                    <li>Live current price; day columns freeze at close (UK trading days)</li>
-                                    <li>Auto-sell: net P/L > 3 % (configurable) or D14 close</li>
-                                    <li>Manual Sell button</li>
-                                    <li>On close: archive to history, remove from tracker</li>
-                                    <li>Retain closed trades 1 year (configurable)</li>
-                                    <li>Purpose: collect success/failure data, not profit</li>
-                                </ul>
-                            </li>
-                            <li><strong>Hit validation</strong>
-                                <ul>
-                                    <li>Record 100 % (or threshold) Hits and follow 72 h</li>
-                                    <li>Simulate £500 buy after stamp; measure net return</li>
-                                    <li>Use results to refine rules</li>
-                                </ul>
-                            </li>
-                            <li><strong>Hypothesis testing (Tool 2)</strong>
-                                <ul>
-                                    <li>Volume & change % week before/after ex-div and earnings</li>
-                                    <li>Gap-down + high volume recovery stats</li>
-                                    <li>Grid search already run; extend as needed</li>
-                                </ul>
-                            </li>
-                            <li><strong>Watchlist (Tool 7)</strong>
-                                <ul>
-                                    <li>Keep sharp fallers visible for bounce</li>
-                                    <li>Highlight sub-threshold later moves</li>
-                                    <li>“Recent fallers that bounced” view</li>
-                                    <li>Poll-marker gold-star logic still to revisit</li>
-                                </ul>
-                            </li>
-                            <li><strong>Data & infra</strong>
-                                <ul>
-                                    <li>Lightweight constituent fingerprint (only scrape when changed)</li>
-                                    <li>Fundamentals no longer wiped by background updater</li>
-                                    <li>N-day average volume calculated on demand</li>
-                                    <li>Sector / industry / market cap / dates stored</li>
-                                </ul>
-                            </li>
-                            <li><strong>Future (after proof)</strong>
-                                <ul>
-                                    <li>Statistical Questions tool</li>
-                                    <li>Event-tracking tables</li>
-                                    <li>Watchlist ranking from surviving Hits</li>
-                                    <li>Tool 6 Insights</li>
-                                </ul>
-                            </li>
-                            <li><strong>Possible future Hit parameters</strong>
-                                <ul>
-                                    <li>Distance from 52-week low (e.g. within 5 %)</li>
-                                    <li>Price vs 50-day / 200-day MA (below = more oversold)</li>
-                                    <li>PE (trailing) unusually low vs own history or sector</li>
-                                    <li>Dividend yield spike (price has fallen)</li>
-                                    <li>Beta (higher = larger expected move)</li>
-                                    <li>Analyst target vs current price (large upside gap)</li>
-                                    <li>Days to / since earnings or ex-div</li>
-                                    <li>Sector-relative performance (fell more than sector)</li>
-                                    <li>Same-day news flag</li>
-                                </ul>
-                            </li>                            
-                        </ul>
+                <!-- General -->
+                <div class="card">
+                    <h3>General</h3>
+                    <div class="section">
+                    Last background update: ${lastBg}<br>
+                    Constituents: ${constituents}<br>
+                    Screener metrics updated: ${metricsUpdated}<br>
+                    Daily closes last date: ${dailyClosesLast}
                     </div>
                 </div>
-            </div>`;
 
-        await this.refreshSchema();
-        // Load scripts list
-        try {
-            const sRes = await fetch("/scripts/list");
-            const files = await sRes.json();
-            const list = document.getElementById("scripts-list");
-            if (list) {
-                if (!files.length) {
-                    list.innerHTML = "<li>No scripts found</li>";
-                } else {
-                    list.innerHTML = files.map(f => `<li><code>${f}</code></li>`).join("");
-                }
-            }
-        } catch (e) {
-            console.error("scripts list failed", e);
+                <!-- Database Schema -->
+                <div class="card">
+                    <h3>Database Schema</h3>
+                    <div class="section" style="font-size:0.85rem; line-height:1.4;">
+                    <strong>index_constituents</strong> — symbol, index_key<br>
+                    <strong>index_quotes</strong> — price, change_pct, volume, avg_volume, name, sector, industry, market_cap, ret_3m, ret_6m, dist_52w_high, above_50ma, pct_from_50ma, above_200ma, pct_from_200ma, vol_20d, sector_rel_1d, sector_rel_5d, …<br>
+                    <strong>daily_closes</strong> — symbol, date, close<br>
+                    <strong>snapshots_5min</strong> — symbol, ts, price, …<br>
+                    <strong>holdings</strong> / <strong>holdings_marks</strong> — positions and daily marks<br>
+                    <strong>app_settings</strong> — key/value (incl. screener_metrics_updated)
+                    </div>
+                </div>
+
+                <!-- Tech Stack -->
+                <div class="card">
+                    <h3>Tech Stack</h3>
+                    <div class="section">
+                    Python 3 + Flask<br>
+                    SQLite (WAL)<br>
+                    yfinance<br>
+                    Vanilla JS + CSS<br>
+                    Canvas sparklines<br>
+                    UK timezone aware<br>
+                    <br>
+                    <a href="https://github.com/dev-learner/ape-stock" target="_blank" style="color:#7fdbff;">GitHub repo</a>
+                    </div>
+                </div>
+
+                <!-- Considerations -->
+                <div class="card" style="grid-column:1 / -1;">
+                    <h3>Considerations</h3>
+                    <div class="section">
+                    <strong>Filters & Scoring</strong>
+                    <ul>
+                        <li>Persistence ranking (top-N days) as live filter or score — strong edge in back-tests</li>
+                        <li>Walk-forward ranking (no look-ahead) for realistic testing</li>
+                        <li>Acceleration flag (3 m vs 6 m, optionally 1 m / 1 y)</li>
+                        <li>Sector-relative strength deeper integration</li>
+                        <li>Editable weights / thresholds in Tool 7 feeding both Screener and Hit</li>
+                    </ul>
+                    <strong>News, RNS & Alerts</strong>
+                    <ul>
+                        <li>News / RNS presence or negative-keyword flag on Screener and Tool 8</li>
+                        <li>Alert system for open positions: price drop, MA loss, new RNS, rank drop, sector deterioration</li>
+                        <li>Back-test impact of skipping entries with recent news</li>
+                    </ul>
+                    <strong>Data & Fundamentals</strong>
+                    <ul>
+                        <li>Deeper sector / industry analysis and relative performance</li>
+                        <li>Expandable fundamentals row in Tool 3 (PE, yield, etc.)</li>
+                        <li>Earnings-date proximity, ex-div awareness</li>
+                    </ul>
+                    <strong>UI & Workflow</strong>
+                    <ul>
+                        <li>Glossary / “How to read” / Help page</li>
+                        <li>Drag-and-drop reordering in Tracker</li>
+                        <li>Test-mode toggle (simulated data when market closed)</li>
+                        <li>“Also down today” filter on Screener</li>
+                        <li>Badge in Tool 8 for current Screener names</li>
+                    </ul>
+                    <strong>Process</strong>
+                    <ul>
+                        <li>User still learning — emphasis on analysis and monitoring over pure mechanical dip-buying</li>
+                        <li>Discretionary exits expected to be earlier than fixed back-test stops</li>
+                    </ul>
+                    </div>
+                </div>
+
+                <!-- Tool 2 -->
+                <div class="card">
+                    <h3>Tool 2 — Ad-Hoc Scripts</h3>
+                    <div class="section"><strong>Description</strong><br>
+                    Run Python analysis and data-prep scripts (metrics update, back-tests, dumps, grid searches). The workbench for testing ideas before they move into the live tools.</div>
+                    <div class="section"><strong>Data</strong><br>
+                    (left as-is for now)</div>
+                    <div class="section"><strong>To Do</strong>
+                    <ul>
+                        <li>Walk-forward version of persistence ranking</li>
+                        <li>News-flag back-test</li>
+                        <li>More sector / industry scripts</li>
+                    </ul></div>
+                </div>
+
+                <!-- Tool 3 -->
+                <div class="card">
+                    <h3>Tool 3 — Holdings Tracker</h3>
+                    <div class="section"><strong>Description</strong><br>
+                    Tracks simulated (or real) positions taken from the Screener or Tool 8. Shows entry, live price, day marks, and three charts (90-day 5-min, today 5-min, 14-day daily). Supports discretionary monitoring and earlier exits.</div>
+                    <div class="section"><strong>Data</strong><br>
+                    Open holdings: ${openCount}<br>
+                    Open P&L (net): £${totalPnl.toFixed(2)}</div>
+                    <div class="section"><strong>To Do</strong>
+                    <ul>
+                        <li>Live update of current day’s +D mark</li>
+                        <li>Drag-and-drop reordering</li>
+                        <li>Expandable fundamentals row</li>
+                        <li>Alerts (price, news, rank drop, MA loss)</li>
+                    </ul></div>
+                </div>
+
+                <!-- Tool 4 -->
+                <div class="card">
+                    <h3>Tool 4 — Screener</h3>
+                    <div class="section"><strong>Description</strong><br>
+                    Builds a relatively stable list of “safe-bet” names (above 50- & 200-day MAs, reasonable 3-month return, size floor). Default sort by 3 m %. Foundation for higher-quality dip-buys.</div>
+                    <div class="section"><strong>Data</strong><br>
+                    Safe bets: ${safeBets}<br>
+                    Metrics last updated: ${metricsUpdated}</div>
+                    <div class="section"><strong>To Do</strong>
+                    <ul>
+                        <li>Live Price + Day % (wired to auto-refresh)</li>
+                        <li>Acceleration cue (3 m vs 6 m)</li>
+                        <li>Persistence ranking display / filter</li>
+                        <li>News / RNS presence flag</li>
+                        <li>Optional “also down today” toggle</li>
+                    </ul></div>
+                </div>
+
+                <!-- Tool 5 placeholder -->
+                <div class="card">
+                    <h3>Tool 5</h3>
+                    <div class="section"><strong>Description</strong><br>Placeholder.</div>
+                    <div class="section"><strong>Data</strong><br>—</div>
+                    <div class="section"><strong>To Do</strong><br>—</div>
+                </div>
+
+                <!-- Tool 6 placeholder -->
+                <div class="card">
+                    <h3>Tool 6</h3>
+                    <div class="section"><strong>Description</strong><br>Placeholder.</div>
+                    <div class="section"><strong>Data</strong><br>—</div>
+                    <div class="section"><strong>To Do</strong><br>—</div>
+                </div>
+
+                <!-- Tool 7 -->
+                <div class="card">
+                    <h3>Tool 7 — Rules</h3>
+                    <div class="section"><strong>Description</strong><br>
+                    Central place for the parameters that drive the Screener, Hit score, and Tracker (thresholds, weights, targets). Currently shows hard-coded values; will become editable.</div>
+                    <div class="section"><strong>Data</strong><br>
+                    Parameters: hard-coded (see page)</div>
+                    <div class="section"><strong>To Do</strong>
+                    <ul>
+                        <li>Make all thresholds / weights editable and persisted</li>
+                        <li>Screener and Hit logic read from here</li>
+                    </ul></div>
+                </div>
+
+                <!-- Tool 8 -->
+                <div class="card">
+                    <h3>Tool 8 — Risers / Fallers</h3>
+                    <div class="section"><strong>Description</strong><br>
+                    Surfaces the day’s biggest risers and fallers across the FTSE universe, with a simple Hit score. Primary discovery view for short-term moves.</div>
+                    <div class="section"><strong>Data</strong><br>
+                    Risers: <span id="dash-risers">—</span><br>
+                    Fallers: <span id="dash-fallers">—</span></div>
+                    <div class="section"><strong>To Do</strong>
+                    <ul>
+                        <li>Visual badge on names that are also current Screener safe-bets</li>
+                        <li>Optional news / RNS flag</li>
+                    </ul></div>
+                </div>
+
+
+            </div>
+        `;
+
+        // Lightweight style injection if needed
+        if (!document.getElementById("dash-card-style")) {
+            const style = document.createElement("style");
+            style.id = "dash-card-style";
+            style.textContent = `
+                .card { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
+                        border-radius:8px; padding:14px 16px; }
+                .card h3 { margin:0 0 10px 0; color:#7fdbff; font-size:1.05rem; }
+                .section { margin-bottom:10px; font-size:0.9rem; line-height:1.45; }
+                .section ul { margin:4px 0 0 18px; padding:0; }
+                .section li { margin-bottom:3px; }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // Fill Tool 8 counts if status provides them
+        if (status.risers != null) {
+            const el = document.getElementById("dash-risers");
+            if (el) el.textContent = status.risers;
+        }
+        if (status.fallers != null) {
+            const el = document.getElementById("dash-fallers");
+            if (el) el.textContent = status.fallers;
         }
     },
 
-    async refreshSchema() {
+    formatDate(iso) {
+        if (!iso) return "—";
         try {
-            const res = await fetch("/schema");
-            const schema = await res.json();
-            const content = document.getElementById("schema-content");
-            if (!content) return;
-
-            const prev = this._lastSchema;
-            let html = `<p><strong>File size:</strong> <span class="schema-size">${schema.db_size_mb} MB</span> (${schema.db_size_bytes.toLocaleString()} bytes)</p>`;
-            html += `<ul style="list-style:none; padding:0; margin-top:8px;">`;
-
-            for (const t of schema.tables) {
-                const cols = t.columns.map(c => `${c.name} (${c.type || "—"})`).join(", ");
-                const changed = prev && prev.tables.find(pt => pt.table === t.table && pt.rows !== t.rows);
-                html += `<li class="schema-table ${changed ? "schema-changed" : ""}" style="margin-bottom:12px;">
-                    <strong>${t.table}</strong> — <span class="schema-rows">${t.rows.toLocaleString()}</span> rows<br>
-                    <small style="color:var(--accent);">${cols}</small>
-                </li>`;
-            }
-            html += `</ul>`;
-            content.innerHTML = html;
-            this._lastSchema = schema;
-
-            setTimeout(() => {
-                content.querySelectorAll(".schema-changed").forEach(el => el.classList.remove("schema-changed"));
-            }, 1800);
-        } catch (e) {
-            console.error("schema refresh failed", e);
+            const d = new Date(iso);
+            const pad = n => String(n).padStart(2, "0");
+            return `${pad(d.getDate())}:${pad(d.getMonth()+1)}:${d.getFullYear()} - ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        } catch {
+            return iso;
         }
     }
 };
-
-document.addEventListener("click", (e) => {
-    if (e.target.matches("[data-tool]") && e.target.dataset.tool !== "dashboard") {
-        if (window.Dashboard) window.Dashboard.stopSchemaPolling();
-    }
-});
 
 ===== FILE: static/js/tool2.js =====
 // static/js/tool2.js
@@ -2486,6 +2629,10 @@ window.Tool3 = {
         let html = `
             <div class="region-bar">
                 <h3>Holdings Tracker (${rows.length} open)</h3>
+                <div class="right-controls">
+                    <button class="mini-btn" id="search-add">Search</button>
+                    <button class="mini-btn" id="reset-holdings" style="background:#c0392b; border-color:#c0392b; color:white;">Reset Holdings</button>
+                </div>
             </div>
             <table class="data-table" id="holdings-table">
                 <thead><tr>
@@ -2497,14 +2644,23 @@ window.Tool3 = {
         rows.forEach((h, idx) => {
             const marks = {};
             (h.marks || []).forEach(m => marks[m.day_offset] = m);
-            const current = marks[0] ? marks[0].price : h.entry_price; // placeholder
+
+            let current = h.entry_price;
+            let maxOffset = -1;
+            for (const m of (h.marks || [])) {
+                if (m.day_offset > maxOffset) {
+                    maxOffset = m.day_offset;
+                    current = m.price;
+                }
+            }
+
             let net = 0;
             if (h.shares && current) {
                 net = (h.shares * current) - h.notional;
             }
             const netCls = net >= 0 ? "positive" : "negative";
 
-            html += `<tr data-id="${h.id}">
+            html += `<tr data-id="${h.id}" class="main-row">
                 <td>${idx+1}</td>
                 <td>${h.entry_date}</td>
                 <td>${h.symbol}</td>
@@ -2513,33 +2669,375 @@ window.Tool3 = {
 
             for (let d = 1; d <= 14; d++) {
                 const m = marks[d];
-                if (m && m.pnl_net != null) {
-                    const cls = m.pnl_net >= 0 ? "positive" : "negative";
-                    html += `<td class="${cls}">${formatNumber(m.pnl_net,"price")}</td>`;
+                if (m && m.price != null) {
+                    const delta = m.price - h.entry_price;
+                    const cls = delta >= 0 ? "positive" : "negative";
+                    const sign = delta >= 0 ? "+" : "";
+                    html += `<td class="${cls}">${sign}${formatNumber(delta,"price")}</td>`;
                 } else {
                     html += `<td>—</td>`;
                 }
             }
             html += `<td class="${netCls}">${formatNumber(net,"price")}</td>
-                     <td><button class="mini-btn sell-btn" data-id="${h.id}">Sell</button></td>
+                     <td><button class="mini-btn sell-btn" data-id="${h.id}" data-price="${current}">Sell</button></td>
                      </tr>`;
+
+            const dayChange = h.change != null ? formatNumber(h.change, "price") : "—";
+            const dayPct = h.change_pct != null ? h.change_pct.toFixed(2) + "%" : "—";
+            const dayCls = h.change_pct > 0 ? "positive" : h.change_pct < 0 ? "negative" : "";
+            const vol = h.volume != null ? formatNumber(h.volume, "volume") : "—";
+
+            html += `<tr class="details-row" data-id="${h.id}">
+                <td colspan="20" style="background:rgba(255,255,255,0.03); padding:12px 16px;">
+                    <div style="display:flex; gap:16px; align-items:flex-start;">
+                        <!-- Fixed-width info block so charts always start at the same horizontal position -->
+                        <div style="width:220px; min-width:220px; padding-top:8px; flex-shrink:0;">
+                            <strong>${h.name || h.symbol}</strong><br>
+                            <span style="color:var(--accent);">${h.exchange || "—"}</span><br>
+                            Day: <span class="${dayCls}">${dayChange} (${dayPct})</span><br>
+                            Vol: ${vol}
+                        </div>
+                        <!-- Charts start here — roughly under the Current column -->
+                        <div style="display:flex; gap:20px; align-items:flex-end; margin-left:40px;">
+                            <div style="text-align:center;">
+                                <div style="font-size:0.75rem; color:var(--accent); margin-bottom:4px; height:16px;">90-day 5-min</div>
+                                <canvas class="chart-multi" data-symbol="${h.symbol}" width="200" height="90" style="background:rgba(0,0,0,0.2); border-radius:4px; display:block;"></canvas>
+                            </div>
+                            <div style="text-align:center;">
+                                <div style="font-size:0.75rem; color:var(--accent); margin-bottom:4px; height:16px;">Today 5-min</div>
+                                <canvas class="chart-5min" data-symbol="${h.symbol}" width="200" height="90" style="background:rgba(0,0,0,0.2); border-radius:4px; display:block;"></canvas>
+                            </div>
+                            <div style="text-align:center;">
+                                <div style="font-size:0.75rem; color:var(--accent); margin-bottom:4px; height:16px;">14-day progress</div>
+                                <canvas class="chart-daily" data-id="${h.id}" width="200" height="90" style="background:rgba(0,0,0,0.2); border-radius:4px; display:block;"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>`;
         });
         html += `</tbody></table>`;
         container.innerHTML = html;
 
+        const resetBtn = document.getElementById("reset-holdings");
+        if (resetBtn) {
+            resetBtn.addEventListener("click", async () => {
+                if (!confirm("Clear ALL holdings data (open + history)?")) return;
+                await fetch("/holdings/reset", { method: "POST" });
+                this.show();
+            });
+        }
+
+        const searchBtn = document.getElementById("search-add");
+        if (searchBtn) {
+            searchBtn.addEventListener("click", () => this.openSearch());
+        }
+
         container.querySelectorAll(".sell-btn").forEach(btn => {
             btn.addEventListener("click", async () => {
                 const id = btn.dataset.id;
-                const price = prompt("Exit price?");
-                if (!price) return;
+                const price = parseFloat(btn.dataset.price);
+                if (!id || isNaN(price)) return;
                 await fetch("/holdings/close", {
                     method: "POST",
                     headers: {"Content-Type":"application/json"},
-                    body: JSON.stringify({id, exit_price: parseFloat(price), reason: "manual"})
+                    body: JSON.stringify({id, exit_price: price, reason: "manual"})
                 });
                 this.show();
             });
         });
+
+        requestAnimationFrame(() => this.drawCharts(rows));
+    },
+
+    openSearch() {
+        let modal = document.getElementById("search-modal");
+        if (!modal) {
+            modal = document.createElement("div");
+            modal.id = "search-modal";
+            modal.style.cssText = `
+                position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+                display: flex; align-items: center; justify-content: center; z-index: 10000;
+            `;
+            modal.innerHTML = `
+                <div style="background:#0d1b2a; padding:24px; border-radius:8px; min-width:380px; border:1px solid #1e3a5f; box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+                    <h3 style="margin:0 0 16px 0; color:#7fdbff;">Add to Tracker</h3>
+                    <input id="search-input" type="text" placeholder="Symbol or name (e.g. BP or BP.L)" 
+                           style="width:100%; padding:10px 12px; margin-bottom:12px; background:#1a1a2e; color:white; 
+                                  border:1px solid #1e3a5f; border-radius:4px; font-size:0.95rem;">
+                    <div id="search-results" style="max-height:240px; overflow:auto; margin-bottom:16px; border:1px solid #1e3a5f; border-radius:4px;"></div>
+                    <div style="display:flex; gap:8px; justify-content:flex-end;">
+                        <button class="mini-btn" id="search-cancel">Cancel</button>
+                        <button class="mini-btn" id="search-confirm" style="background:#1e5c3a;">Add</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+        modal.style.display = "flex";
+        const input = document.getElementById("search-input");
+        input.value = "";
+        input.dataset.price = "";
+        input.focus();
+        document.getElementById("search-results").innerHTML = "";
+
+        const doSearch = async () => {
+            const q = input.value.trim();
+            if (q.length < 1) {
+                document.getElementById("search-results").innerHTML = "";
+                return;
+            }
+            const res = await fetch(`/search?q=${encodeURIComponent(q)}`);
+            const data = await res.json();
+            const box = document.getElementById("search-results");
+            if (!data.length) {
+                box.innerHTML = "<p style='color:#888; padding:8px; margin:0;'>No matches</p>";
+                return;
+            }
+            box.innerHTML = data.slice(0, 10).map(r =>
+                `<div class="search-hit" data-symbol="${r.symbol}" data-price="${r.price || ""}" 
+                      style="padding:8px 12px; cursor:pointer; border-bottom:1px solid #1e3a5f; color:#e0e0e0;">
+                    <strong>${r.symbol}</strong> — ${r.name || ""} 
+                    ${r.price ? `<span style="float:right; color:#7fdbff;">${formatNumber(r.price, "price")}</span>` : ""}
+                </div>`
+            ).join("");
+            box.querySelectorAll(".search-hit").forEach(el => {
+                el.addEventListener("click", () => {
+                    input.value = el.dataset.symbol;
+                    input.dataset.price = el.dataset.price;
+                    box.querySelectorAll(".search-hit").forEach(h => h.style.background = "");
+                    el.style.background = "rgba(127,219,255,0.15)";
+                });
+                el.addEventListener("mouseenter", () => {
+                    if (el.style.background === "") el.style.background = "rgba(255,255,255,0.05)";
+                });
+                el.addEventListener("mouseleave", () => {
+                    if (!el.style.background.includes("127,219,255")) el.style.background = "";
+                });
+            });
+        };
+
+        input.oninput = doSearch;
+        input.onkeydown = (e) => { if (e.key === "Enter") doSearch(); };
+
+        document.getElementById("search-cancel").onclick = () => { modal.style.display = "none"; };
+
+        document.getElementById("search-confirm").onclick = async () => {
+            const sym = input.value.trim().toUpperCase();
+            const price = parseFloat(input.dataset.price);
+            if (!sym || isNaN(price)) {
+                alert("Select a symbol with a price from the list");
+                return;
+            }
+            const notional = parseFloat(localStorage.getItem("notional") || "500");
+            const stamp = parseFloat(localStorage.getItem("stampPct") || "0.5");
+            const res = await fetch("/holdings/open", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ symbol: sym, price: price, notional: notional, stamp_pct: stamp })
+            });
+            let msgText = "Bought";
+            if (res.status === 409) msgText = "Already Bought";
+            else if (!res.ok) msgText = "Failed";
+
+            let msg = document.getElementById("buy-msg");
+            if (!msg) {
+                msg = document.createElement("div");
+                msg.id = "buy-msg";
+                msg.style.cssText = `
+                    position: fixed; top: 20px; right: 20px; background: var(--accent);
+                    color: white; padding: 8px 16px; border-radius: 4px; opacity: 0;
+                    transition: opacity 0.4s ease; z-index: 9999; pointer-events: none;
+                `;
+                document.body.appendChild(msg);
+            }
+            msg.textContent = `${msgText}: ${sym}`;
+            msg.style.opacity = "1";
+            setTimeout(() => { msg.style.opacity = "0"; }, 1200);
+
+            input.value = "";
+            input.dataset.price = "";
+            document.getElementById("search-results").innerHTML = "";
+            input.focus();
+            if (res.ok) this.show();
+        };
+    },
+
+    async drawCharts(rows) {
+        // Multi-day 5-min (last ~90 days)
+        document.querySelectorAll("canvas.chart-multi").forEach(async canvas => {
+            const sym = canvas.dataset.symbol;
+            try {
+                const res = await fetch(`/sparkline/${sym}?days=90`);
+                const data = await res.json();
+                const prices = (data.prices && data.prices.length > 1) ? data.prices : [1, 1];
+                drawSparkline(canvas, prices, "line");
+            } catch (e) {
+                drawSparkline(canvas, [1, 1], "line");
+            }
+        });
+
+        // Today 5-min
+        document.querySelectorAll("canvas.chart-5min").forEach(async canvas => {
+            const sym = canvas.dataset.symbol;
+            try {
+                const res = await fetch(`/sparkline/${sym}`);
+                const data = await res.json();
+                const prices = (data.prices && data.prices.length > 1) ? data.prices : [1, 1];
+                drawSparkline(canvas, prices, "line");
+            } catch (e) {
+                drawSparkline(canvas, [1, 1], "line");
+            }
+        });
+
+        // 14-day progress from marks
+        rows.forEach(h => {
+            const canvas = document.querySelector(`canvas.chart-daily[data-id="${h.id}"]`);
+            if (!canvas) return;
+            const prices = [h.entry_price];
+            const marks = (h.marks || []).slice().sort((a, b) => a.day_offset - b.day_offset);
+            marks.forEach(m => {
+                if (m.day_offset >= 1 && m.price != null) prices.push(m.price);
+            });
+            if (prices.length < 2) prices.push(h.entry_price);
+            drawSparkline(canvas, prices, "line");
+        });
+    }
+};
+
+===== FILE: static/js/tool4.js =====
+// static/js/tool4.js
+window.Tool4 = {
+    async show() {
+        const res = await fetch("/screener");
+        const data = await res.json();
+        const rows = data.rows || [];
+
+        // Gold star: symbols currently in Tool 8 risers or fallers
+        let tool8Symbols = new Set();
+        try {
+            const body = {
+                risers_index: "ALL",
+                fallers_index: "ALL",
+                limit: "all"
+            };
+            const tres = await fetch("/tool/8", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+            });
+            const tdata = await tres.json();
+            const result = tdata.result || {};
+            (result.risers || []).forEach(r => tool8Symbols.add(r.symbol));
+            (result.fallers || []).forEach(r => tool8Symbols.add(r.symbol));
+        } catch (e) {
+            console.warn("Could not load Tool 8 symbols for stars", e);
+        }
+        window.AppState.tool8Symbols = tool8Symbols;
+
+        this.render(rows);
+    },
+
+    render(rows) {
+        const container = document.getElementById("results");
+        container.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2>Screener (${rows.length} safe bets)</h2>
+                <button id="add-to-tracker" class="mini-btn" style="background:#1e5c3a;">Add selected to Tracker</button>
+            </div>
+            <table class="data-table" id="screener-table">
+                <thead>
+                    <tr>
+                        <th title="Ticker symbol">Symbol</th>
+                        <th title="Company name">Name</th>
+                        <th title="Sector">Sector</th>
+                        <th title="Latest price">Price</th>
+                        <th title="Today's percentage change">Day %</th>
+                        <th title="3-month return">3m %</th>
+                        <th title="6-month return">6m %</th>
+                        <th title="Distance from 52-week high (0 = at the high)">Dist 52w</th>
+                        <th title="Percentage above/below 50-day MA">vs 50MA</th>
+                        <th title="Percentage above/below 200-day MA">vs 200MA</th>
+                        <th title="20-day realised volatility">Vol 20d</th>
+                        <th title="1-day return relative to sector">Sec 1d</th>
+                        <th title="5-day return relative to sector">Sec 5d</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.map(r => {
+                        const star = window.AppState.tool8Symbols?.has(r.symbol) ? "⭐ " : "";
+                        const dayCls = (r.change_pct || 0) >= 0 ? "positive" : "negative";
+                        return `
+                        <tr>
+                            <td>${star}${r.symbol}</td>
+                            <td>${(r.name || "").substring(0, 28)}</td>
+                            <td>${r.sector || ""}</td>
+                            <td class="price-cell" data-symbol="${r.symbol}">${formatNumber(r.price)}</td>
+                            <td class="day-cell ${dayCls}" data-symbol="${r.symbol}">${r.change_pct != null ? r.change_pct.toFixed(2) + "%" : ""}</td>
+                            <td class="${(r.ret_3m || 0) >= 0 ? "positive" : "negative"}">${r.ret_3m != null ? r.ret_3m.toFixed(1) : ""}</td>
+                            <td class="${(r.ret_6m || 0) >= 0 ? "positive" : "negative"}">${r.ret_6m != null ? r.ret_6m.toFixed(1) : ""}</td>
+                            <td>${r.dist_52w_high != null ? r.dist_52w_high.toFixed(1) : ""}</td>
+                            <td>${r.pct_from_50ma != null ? r.pct_from_50ma.toFixed(1) : ""}</td>
+                            <td>${r.pct_from_200ma != null ? r.pct_from_200ma.toFixed(1) : ""}</td>
+                            <td>${r.vol_20d != null ? r.vol_20d.toFixed(1) : ""}</td>
+                            <td class="${(r.sector_rel_1d || 0) >= 0 ? "positive" : "negative"}">${r.sector_rel_1d != null ? r.sector_rel_1d.toFixed(1) : ""}</td>
+                            <td class="${(r.sector_rel_5d || 0) >= 0 ? "positive" : "negative"}">${r.sector_rel_5d != null ? r.sector_rel_5d.toFixed(1) : ""}</td>
+                            <td><input type="checkbox" data-symbol="${r.symbol}"></td>
+                        </tr>`;
+                    }).join("")}
+                </tbody>
+            </table>
+        `;
+
+        document.getElementById("add-to-tracker")?.addEventListener("click", async () => {
+            const checked = [...document.querySelectorAll("#screener-table input[type=checkbox]:checked")];
+            if (!checked.length) return;
+
+            const notional = parseFloat(localStorage.getItem("notional") || "500");
+            const stamp = parseFloat(localStorage.getItem("stampPct") || "0.5");
+            let added = 0;
+
+            for (const cb of checked) {
+                const sym = cb.dataset.symbol;
+                const row = rows.find(r => r.symbol === sym);
+                if (!row || row.price == null) continue;
+
+                const res = await fetch("/holdings/open", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        symbol: sym,
+                        price: row.price,
+                        notional: notional,
+                        stamp_pct: stamp
+                    })
+                });
+                if (res.ok || res.status === 409) added++;
+            }
+            alert(`Processed ${added} name(s)`);
+        });
+
+        if (window.makeTableSortable) {
+            makeTableSortable(document.getElementById("screener-table"));
+        }
+    },
+
+    async refreshPrices() {
+        try {
+            const res = await fetch("/screener");
+            const data = await res.json();
+            const rows = data.rows || [];
+            rows.forEach(r => {
+                const priceCell = document.querySelector(`.price-cell[data-symbol="${r.symbol}"]`);
+                const dayCell = document.querySelector(`.day-cell[data-symbol="${r.symbol}"]`);
+                if (priceCell) priceCell.textContent = formatNumber(r.price);
+                if (dayCell) {
+                    dayCell.textContent = r.change_pct != null ? r.change_pct.toFixed(2) + "%" : "";
+                    dayCell.className = `day-cell ${(r.change_pct || 0) >= 0 ? "positive" : "negative"}`;
+                }
+            });
+        } catch (e) {}
     }
 };
 
@@ -2567,382 +3065,61 @@ window.Tool6 = {
 // static/js/tool7.js
 window.Tool7 = {
     async show() {
-        const res = await fetch("/tool/7", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: "{}"
-        });
-        const data = await res.json();
-        this.render(data.result?.watchlist || []);
-    },
-
-    render(rows) {
-        const def = localStorage.getItem("defaultWlSort") || "change_pct:1";
-        const [defKey, defDir] = def.split(":");
-        if (!window.AppState.wlSort || !window.AppState.wlSort.key) {
-            window.AppState.wlSort = { key: defKey, dir: parseInt(defDir, 10) };
-        }
-
         const container = document.getElementById("results");
-        const count = rows.length;
-
-        let pollLabel = "No Poll";
-        if (window.AppState.pollActive && window.AppState.pollSort) {
-            const arrow = window.AppState.pollSort.dir === 1 ? "↑" : "↓";
-            const names = {
-                symbol: "Symbol", name: "Name", exchange: "Exchange",
-                price: "Price", change: "Change", change_pct: "Change %", volume: "Volume"
-            };
-            const col = names[window.AppState.pollSort.key] || window.AppState.pollSort.key;
-            pollLabel = `Poll Set: ${arrow} ${col}`;
-        } else if (window.AppState.pollActive) {
-            pollLabel = "Poll Set";
-        }
-
         container.innerHTML = `
             <div class="region-bar">
-                <h3>Watchlist (${count} ${count === 1 ? "entry" : "entries"}) 
-                    <span style="margin-left:16px; color:var(--accent); font-weight:normal;">${pollLabel}</span>
-                </h3>
+                <h3>Rules</h3>
                 <div class="right-controls">
-                    <button class="mini-btn" id="search-btn">Search</button>
-                    <button class="mini-btn" id="poll-btn">${window.AppState.pollActive ? "Clear Poll" : "Set Poll"}</button>
-                    <button class="mini-btn" id="remove-btn">Remove Selected</button>
+                    <span style="font-size:0.85rem; color:var(--accent);">Hard-coded values (will become editable)</span>
                 </div>
             </div>
-            <div id="watchlist-table">${this.renderTable(rows)}</div>`;
+            <div style="padding:16px 8px; max-width:720px;">
+                <p style="color:#aaa; margin-top:0;">
+                    These are the values currently baked into the code. 
+                    They will be moved here so the Screener, Hit score and Tracker can read them from one place.
+                </p>
 
-        document.getElementById("remove-btn").addEventListener("click", async () => {
-            const checked = [...document.querySelectorAll("#watchlist-table input:checked")].map(cb => cb.dataset.symbol);
-            if (!checked.length) return;
-            if (window.AppState.pollActive && window.AppState.pollPrices) {
-                checked.forEach(sym => delete window.AppState.pollPrices[sym]);
-                localStorage.setItem("pollPrices", JSON.stringify(window.AppState.pollPrices));
-            }
-            await fetch("/watchlist/remove", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ symbols: checked })
-            });
-            this.show();
-        });
+                <h4 style="margin:20px 0 8px; color:#7fdbff;">Hit / Faller rules</h4>
+                <table class="data-table" style="width:100%;">
+                    <thead><tr><th>Parameter</th><th>Current value</th><th>Used for</th></tr></thead>
+                    <tbody>
+                        <tr><td>Min |change %|</td><td>5</td><td>Hit point</td></tr>
+                        <tr><td>£ impact threshold</td><td>20,000,000</td><td>Hit point</td></tr>
+                        <tr><td>Volume ratio</td><td>1.5</td><td>Hit point</td></tr>
+                        <tr><td>RSI(7) oversold</td><td>≤ 30</td><td>Hit point (fallers)</td></tr>
+                        <tr><td>Hit % required</td><td>50</td><td>Qualification</td></tr>
+                    </tbody>
+                </table>
 
-        document.getElementById("poll-btn").addEventListener("click", () => {
-            if (window.AppState.pollActive) {
-                // Clear poll
-                window.AppState.pollActive = false;
-                window.AppState.pollPrices = null;
-                window.AppState.pollSort = null;
-                window.AppState.pollPendingNew = new Set();
-                localStorage.removeItem("pollPrices");
-                localStorage.removeItem("pollSort");
-                localStorage.setItem("pollActive", "false");
-            } else {
-                // Set poll — snapshot current prices
-                const prices = {};
-                document.querySelectorAll("#wl-table tbody tr").forEach(tr => {
-                    const sym = tr.dataset.symbol;
-                    const priceCell = tr.querySelector("[data-field=price]");
-                    if (sym && priceCell) {
-                        const p = parseFloat(priceCell.textContent.replace(/[^0-9.-]/g, ""));
-                        if (!isNaN(p)) prices[sym] = p;
-                    }
-                });
-                window.AppState.pollPrices = prices;
-                window.AppState.pollActive = true;
-                window.AppState.pollPendingNew = new Set();
-                window.AppState.pollSort = window.AppState.wlSort ? { ...window.AppState.wlSort } : { key: "change_pct", dir: 1 };
-                localStorage.setItem("pollPrices", JSON.stringify(prices));
-                localStorage.setItem("pollSort", JSON.stringify(window.AppState.pollSort));
-                localStorage.setItem("pollActive", "true");
-            }
-            this.show();
-        });
+                <h4 style="margin:24px 0 8px; color:#7fdbff;">Tracker</h4>
+                <table class="data-table" style="width:100%;">
+                    <thead><tr><th>Parameter</th><th>Current value</th><th>Used for</th></tr></thead>
+                    <tbody>
+                        <tr><td>Close target</td><td>3 %</td><td>Auto-sell</td></tr>
+                        <tr><td>Stamp duty</td><td>0.5 %</td><td>Net £ calc</td></tr>
+                        <tr><td>Default notional</td><td>£500</td><td>New positions</td></tr>
+                    </tbody>
+                </table>
 
-        document.getElementById("search-btn").addEventListener("click", () => {
-            window.openSearchModal();
-        });
+                <h4 style="margin:24px 0 8px; color:#7fdbff;">Screener / Safe-bet (planned)</h4>
+                <table class="data-table" style="width:100%;">
+                    <thead><tr><th>Parameter</th><th>Proposed default</th><th>Notes</th></tr></thead>
+                    <tbody>
+                        <tr><td>Min market cap / index</td><td>FTSE 100 preferred</td><td>Size / liquidity floor</td></tr>
+                        <tr><td>Trend filter</td><td>Above 50-day &amp; 200-day MA</td><td>Avoid multi-month downtrends</td></tr>
+                        <tr><td>3-month return floor</td><td>&gt; –15 %</td><td>Not in free-fall</td></tr>
+                        <tr><td>Avg volume floor</td><td>Adequate for size</td><td>Practical fills</td></tr>
+                        <tr><td>Max distance from 52w high</td><td>Optional</td><td>Leadership filter</td></tr>
+                    </tbody>
+                </table>
 
-        const selectAll = document.getElementById("select-all-wl");
-        if (selectAll) {
-            selectAll.addEventListener("change", () => {
-                document.querySelectorAll("#watchlist-table input[type=checkbox][data-symbol]").forEach(cb => {
-                    cb.checked = selectAll.checked;
-                });
-            });
-        }
-
-        this.afterRender(rows);
-    },
-
-    renderTable(rows) {
-        if (!rows || !rows.length) return "<p>Watchlist is empty.</p>";
-        let html = `<table class="data-table" id="wl-table"><thead><tr>
-            <th>No.</th>
-            <th data-key="symbol">Symbol</th>
-            <th data-key="name">Name</th>
-            <th data-key="exchange">Exchange</th>
-            <th>Poll</th>
-            <th>Journey</th>
-            <th data-key="price">Price</th>
-            <th data-key="change">Change</th>
-            <th data-key="change_pct">Change %</th>
-            <th data-key="volume">Volume</th>
-            <th style="text-align:center;">Select<br><input type="checkbox" id="select-all-wl" title="Select / deselect all"></th>
-        </tr></thead><tbody>`;
-        for (const r of rows) {
-            const pct = r.change_pct != null ? r.change_pct.toFixed(2) + "%" : "";
-            const cls = (r.change_pct > 0) ? "positive" : (r.change_pct < 0) ? "negative" : "";
-            html += `<tr class="${cls}" data-symbol="${r.symbol}">
-                <td class="row-num"></td>
-                <td>${buildSymbolLink(r.symbol, r.exchange)}</td>
-                <td>${r.name}</td>
-                <td>${r.exchange || ""}</td>
-                <td class="poll-cell" data-symbol="${r.symbol}"></td>
-                <td>
-                    <div class="journey">
-                        <span class="added-date" data-symbol="${r.symbol}">—</span>
-                        <span class="added-price" data-symbol="${r.symbol}">—</span>
-                        <canvas class="spark" data-symbol="${r.symbol}" width="70" height="22"></canvas>
-                        <span class="since-added" data-symbol="${r.symbol}">—</span>
-                    </div>
-                </td>
-                <td data-field="price">${formatNumber(r.price, "price")}</td>
-                <td class="${cls}" data-field="change">${formatNumber(r.change, "price")}</td>
-                <td class="${cls}" data-field="change_pct">${pct}</td>
-                <td data-field="volume">${formatNumber(r.volume, "volume")}</td>
-                <td style="text-align:center;"><input type="checkbox" data-symbol="${r.symbol}"></td>
-            </tr>`;
-        }
-        html += "</tbody></table>";
-        return html;
-    },
-
-    async afterRender(rows) {
-        if (!window.AppState.pollActive) {
-            window.AppState.wlDataOrder = rows.map(r => r.symbol);
-        }
-
-        const table = document.getElementById("wl-table");
-        if (table) {
-            makeTableSortable(table, {
-                onSort: (key, dir) => {
-                    window.AppState.wlSort = { key, dir };
-                    this.updateRowNumbersAndPoll();
-                }
-            });
-        }
-        const style = localStorage.getItem("sparklineStyle") || "line";
-        requestAnimationFrame(() => {
-            document.querySelectorAll("canvas.spark").forEach(async canvas => {
-                const sym = canvas.dataset.symbol;
-                const row = rows.find(x => x.symbol === sym) || {};
-                try {
-                    const res = await fetch(`/sparkline/${sym}`);
-                    const data = await res.json();
-                    const prices = (data.prices && data.prices.length > 1) ? data.prices : [1, 1.02, 0.98, 1.01, 1.03];
-                    drawSparkline(canvas, prices, style);
-                } catch (e) {
-                    drawSparkline(canvas, [1, 1.02, 0.98, 1.01, 1.03], style);
-                }
-
-                const addedEl = document.querySelector(`.added-price[data-symbol="${sym}"]`);
-                const dateEl = document.querySelector(`.added-date[data-symbol="${sym}"]`);
-                const sinceEl = document.querySelector(`.since-added[data-symbol="${sym}"]`);
-
-                if (row.added) {
-                    const d = new Date(row.added);
-                    const dd = String(d.getDate()).padStart(2, "0");
-                    const mm = String(d.getMonth() + 1).padStart(2, "0");
-                    const yyyy = d.getFullYear();
-                    if (dateEl) dateEl.textContent = `${dd}/${mm}/${yyyy}`;
-                }
-                if (row.added_price != null && addedEl) {
-                    addedEl.textContent = formatNumber(row.added_price, "price");
-                }
-
-                const added = row.added_price;
-                const current = row.price;
-                if (added && current && sinceEl) {
-                    const diff = current - added;
-                    const pct = (diff / added * 100);
-                    const diffText = (diff >= 0 ? "+" : "") + formatNumber(diff, "price");
-                    const pctText = (pct >= 0 ? "+" : "") + pct.toFixed(1) + "%";
-                    sinceEl.textContent = `${diffText} (${pctText})`;
-                    sinceEl.className = "since-added " + (diff >= 0 ? "positive" : "negative");
-                }
-            });
-
-            if (window.AppState.wlSort && window.AppState.wlSort.key) {
-                reapplySortIfChanged(table, window.AppState.wlSort.key, window.AppState.wlSort.dir);
-            }
-
-            this.updateRowNumbersAndPoll();
-        });
-    },
-
-    updateRowNumbersAndPoll() {
-        const table = document.getElementById("wl-table");
-        if (!table) return;
-        const rows = [...table.querySelectorAll("tbody tr")];
-
-        rows.forEach((tr, idx) => {
-            const numCell = tr.querySelector(".row-num");
-            if (numCell) numCell.textContent = idx + 1;
-        });
-
-        if (!window.AppState.pollActive || !window.AppState.pollPrices) {
-            rows.forEach(tr => {
-                const cell = tr.querySelector(".poll-cell");
-                if (cell) cell.innerHTML = "";
-            });
-            return;
-        }
-
-        if (!window.AppState.pollPendingNew) {
-            window.AppState.pollPendingNew = new Set();
-        }
-
-        const pollPrices = window.AppState.pollPrices;
-        const currentPrices = {};
-        let anyExistingMoved = false;
-
-        rows.forEach(tr => {
-            const sym = tr.dataset.symbol;
-            const priceCell = tr.querySelector("[data-field=price]");
-            const current = priceCell ? parseFloat(priceCell.textContent.replace(/[^0-9.-]/g, "")) : NaN;
-            currentPrices[sym] = current;
-
-            if (!(sym in pollPrices)) {
-                window.AppState.pollPendingNew.add(sym);
-            } else if (!isNaN(current) && current !== pollPrices[sym]) {
-                anyExistingMoved = true;
-            }
-        });
-
-        // Only promote stars on a *subsequent* render after an existing price has moved
-        if (anyExistingMoved && window.AppState.pollPendingNew.size) {
-            window.AppState.pollPendingNew.forEach(sym => {
-                if (!(sym in pollPrices) && !isNaN(currentPrices[sym])) {
-                    pollPrices[sym] = currentPrices[sym];
-                }
-            });
-            window.AppState.pollPendingNew.clear();
-            localStorage.setItem("pollPrices", JSON.stringify(pollPrices));
-        }
-
-        rows.forEach(tr => {
-            const cell = tr.querySelector(".poll-cell");
-            if (!cell) return;
-            const sym = tr.dataset.symbol;
-            const current = currentPrices[sym];
-
-            if (window.AppState.pollPendingNew.has(sym)) {
-                cell.innerHTML = this.pollIcon("new");
-                return;
-            }
-
-            if (!(sym in pollPrices) || isNaN(current) || isNaN(pollPrices[sym])) {
-                cell.innerHTML = this.pollIcon("stable");
-                return;
-            }
-
-            const base = pollPrices[sym];
-            if (current > base) cell.innerHTML = this.pollIcon("up");
-            else if (current < base) cell.innerHTML = this.pollIcon("down");
-            else cell.innerHTML = this.pollIcon("stable");
-        });
-    },
-
-    pollIcon(type) {
-        if (type === "up") {
-            return `<svg width="14" height="14" viewBox="0 0 14 14" style="vertical-align:middle"><polygon points="7,2 12,10 2,10" fill="#4ade80"/></svg>`;
-        }
-        if (type === "down") {
-            return `<svg width="14" height="14" viewBox="0 0 14 14" style="vertical-align:middle"><polygon points="7,12 12,4 2,4" fill="#f87171"/></svg>`;
-        }
-        if (type === "new") {
-            return `<svg width="14" height="14" viewBox="0 0 14 14" style="vertical-align:middle"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,10.5 3,13 4,8.5 1,5.5 5,5" fill="#e67e22"/></svg>`;
-        }
-        return `<svg width="12" height="12" viewBox="0 0 12 12" style="vertical-align:middle"><circle cx="6" cy="6" r="5" fill="#4ade80"/></svg>`;
+                <p style="margin-top:24px; color:#888; font-size:0.9rem;">
+                    Next step: turn the tables above into editable inputs that write to <code>app_settings</code> 
+                    (or a dedicated rules table). Screener and Hit logic will then read from there instead of constants.
+                </p>
+            </div>
+        `;
     }
-};
-
-// Reusable search modal
-window.openSearchModal = function () {
-    let modal = document.getElementById("search-modal");
-    if (!modal) {
-        modal = document.createElement("div");
-        modal.id = "search-modal";
-        modal.innerHTML = `
-            <div class="modal-backdrop"></div>
-            <div class="modal-box">
-                <h3>Search & Add to Watchlist</h3>
-                <input type="text" id="search-input" placeholder="Type ticker or company name…" autocomplete="off">
-                <div id="search-results" class="search-list"></div>
-                <div class="modal-actions">
-                    <button class="mini-btn" id="search-cancel">Cancel</button>
-                    <button class="mini-btn" id="search-save">Save to Watchlist</button>
-                </div>
-            </div>`;
-        document.body.appendChild(modal);
-
-        document.getElementById("search-cancel").addEventListener("click", () => {
-            modal.style.display = "none";
-        });
-
-        document.getElementById("search-save").addEventListener("click", async () => {
-            const selected = [...document.querySelectorAll("#search-results .search-item.selected")]
-                .map(el => el.dataset.symbol);
-            if (!selected.length) {
-                alert("Select one or more stocks first (click a row)");
-                return;
-            }
-            await fetch("/watchlist/save", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ symbols: selected })
-            });
-            if (window.AppState.pollActive && window.Tool7) {
-                // New entries get star; prices will be evaluated on next render
-            }
-            if (window.Tool7) window.Tool7.show();
-
-            document.querySelectorAll("#search-results .search-item.selected").forEach(el => el.classList.remove("selected"));
-            document.getElementById("search-input").value = "";
-            document.getElementById("search-results").innerHTML = "";
-            document.getElementById("search-input").focus();
-        });
-
-        const input = document.getElementById("search-input");
-        let searchTimer = null;
-        input.addEventListener("input", () => {
-            clearTimeout(searchTimer);
-            searchTimer = setTimeout(async () => {
-                const q = input.value.trim();
-                const box = document.getElementById("search-results");
-                if (q.length < 1) { box.innerHTML = ""; return; }
-                const res = await fetch("/search", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ q })
-                });
-                const items = await res.json();
-                box.innerHTML = items.map(it => `
-                    <div class="search-item" data-symbol="${it.symbol}">
-                        <strong>${it.symbol}</strong> — ${it.name || ""}
-                        <span style="float:right">${it.change_pct != null ? it.change_pct.toFixed(2) + "%" : ""}</span>
-                    </div>`).join("");
-                box.querySelectorAll(".search-item").forEach(el => {
-                    el.addEventListener("click", () => el.classList.toggle("selected"));
-                });
-            }, 200);
-        });
-    }
-    modal.style.display = "flex";
-    document.getElementById("search-input").value = "";
-    document.getElementById("search-results").innerHTML = "";
-    document.getElementById("search-input").focus();
 };
 
 ===== FILE: static/js/tool8.js =====
@@ -2960,29 +3137,18 @@ window.Tool8 = {
             body: JSON.stringify(body)
         });
         const data = await res.json();
-        // Always replace with the freshly enriched payload
+
+        // --- gold star: fetch Screener symbols ---
+        let screenerSymbols = new Set();
+        try {
+            const sres = await fetch("/screener");
+            const sdata = await sres.json();
+            (sdata.rows || []).forEach(r => screenerSymbols.add(r.symbol));
+        } catch (e) {}
+        window.AppState.screenerSymbols = screenerSymbols;
+        // --- end gold star ---
+
         this.render(data.result || {});
-        this.autoAddToWatchlist(data.result || {});
-    },
-
-    async autoAddToWatchlist(result) {
-        const risersPct = parseFloat(localStorage.getItem("risersSelectPct") || "5");
-        const fallersPct = parseFloat(localStorage.getItem("fallersSelectPct") || "5");
-        const toAdd = new Set();
-
-        (result.risers || []).forEach(r => {
-            if (r.change_pct != null && r.change_pct >= risersPct) toAdd.add(r.symbol);
-        });
-        (result.fallers || []).forEach(r => {
-            if (r.change_pct != null && r.change_pct <= -fallersPct) toAdd.add(r.symbol);
-        });
-
-        if (toAdd.size === 0) return;
-        await fetch("/watchlist/save", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ symbols: [...toAdd] })
-        });
     },
 
     render(result) {
@@ -2991,29 +3157,30 @@ window.Tool8 = {
         window.AppState.currentRisersIndex = result.risers_index || "ALL";
         window.AppState.currentFallersIndex = result.fallers_index || "ALL";
 
+        const risers = window.AppState.rawRisers;
+        const fallers = window.AppState.rawFallers;
+
         const container = document.getElementById("results");
         container.innerHTML = `
             <div class="split-view">
                 <div class="split-panel">
                     <div class="region-bar">
-                        <div class="left-controls"><h3>Risers</h3><div class="region-buttons" id="risers-index-btns"></div></div>
+                        <div class="left-controls"><h3>Risers (${risers.length})</h3><div class="region-buttons" id="risers-index-btns"></div></div>
                         <div class="right-controls">
                             <button class="mini-btn buy-btn" data-side="risers">Buy Selected</button>
                             <button class="mini-btn expand-btn" data-side="risers">Expand Selected</button>
                             <button class="mini-btn filter-btn" data-side="risers">Filter Selected</button>
-                            <button class="mini-btn save-btn" data-side="risers">Save Selected</button>
                         </div>
                     </div>
                     <div id="risers-table"></div>
                 </div>
                 <div class="split-panel">
                     <div class="region-bar">
-                        <div class="left-controls"><h3>Fallers</h3><div class="region-buttons" id="fallers-index-btns"></div></div>
+                        <div class="left-controls"><h3>Fallers (${fallers.length})</h3><div class="region-buttons" id="fallers-index-btns"></div></div>
                         <div class="right-controls">
                             <button class="mini-btn buy-btn" data-side="fallers">Buy Selected</button>
                             <button class="mini-btn expand-btn" data-side="fallers">Expand Selected</button>
                             <button class="mini-btn filter-btn" data-side="fallers">Filter Selected</button>
-                            <button class="mini-btn save-btn" data-side="fallers">Save Selected</button>
                         </div>
                     </div>
                     <div id="fallers-table"></div>
@@ -3025,7 +3192,6 @@ window.Tool8 = {
         this.renderFiltered("risers");
         this.renderFiltered("fallers");
 
-        // Bind buttons (clone to clear any old listeners)
         container.querySelectorAll(".expand-btn, .filter-btn, .save-btn").forEach(btn => {
             btn.replaceWith(btn.cloneNode(true));
         });
@@ -3064,7 +3230,7 @@ window.Tool8 = {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ symbols })
                 });
-                alert(`Saved ${symbols.length} symbol(s) to watchlist`);
+                alert(`Added ${symbols.length} symbol(s) to watchlist`);
             });
         });
 
@@ -3076,10 +3242,14 @@ window.Tool8 = {
                 const notional = parseFloat(localStorage.getItem("notional") || "500");
                 const stamp = parseFloat(localStorage.getItem("stampPct") || "0.5");
 
+                if (!selected.size) return;
+
+                const messages = [];
                 for (const sym of selected) {
                     const row = raw.find(r => r.symbol === sym);
                     if (!row || !row.price) continue;
-                    await fetch("/holdings/open", {
+
+                    const res = await fetch("/holdings/open", {
                         method: "POST",
                         headers: {"Content-Type": "application/json"},
                         body: JSON.stringify({
@@ -3089,13 +3259,47 @@ window.Tool8 = {
                             stamp_pct: stamp
                         })
                     });
+
+                    let msgText = "Bought";
+                    if (res.status === 409) {
+                        msgText = "Already Bought";
+                    } else if (!res.ok) {
+                        msgText = "Failed";
+                    }
+                    messages.push(`${msgText}: ${sym}`);
                 }
-                alert(`Opened ${selected.size} holding(s)`);
+
+                for (let i = 0; i < messages.length; i++) {
+                    setTimeout(() => {
+                        let msg = document.getElementById("buy-msg");
+                        if (!msg) {
+                            msg = document.createElement("div");
+                            msg.id = "buy-msg";
+                            msg.style.cssText = `
+                                position: fixed;
+                                top: 20px;
+                                right: 20px;
+                                background: var(--accent);
+                                color: white;
+                                padding: 8px 16px;
+                                border-radius: 4px;
+                                opacity: 0;
+                                transition: opacity 0.4s ease;
+                                z-index: 9999;
+                                pointer-events: none;
+                            `;
+                            document.body.appendChild(msg);
+                        }
+                        msg.textContent = messages[i];
+                        msg.style.opacity = "1";
+                        setTimeout(() => { msg.style.opacity = "0"; }, 1100);
+                    }, i * 1300);
+                }
+
                 selected.clear();
                 this.renderFiltered(side);
             });
         });
-
     },
 
     buildIndexButtons(containerId, active, side) {
@@ -3135,7 +3339,6 @@ window.Tool8 = {
         if (table) makeTableSortable(table);
         attachCheckboxListeners(containerId, selected);
 
-        // Optional: still fill vol-ratio display if you want the live calc
         document.querySelectorAll(`#${containerId} .vol-ratio`).forEach(async el => {
             const sym = el.dataset.symbol;
             const row = raw.find(x => x.symbol === sym);
@@ -3173,7 +3376,10 @@ window.Tool8 = {
             const shortName = (r.name || "").length > 15 ? (r.name || "").slice(0, 15) + "…" : (r.name || "");
             const fullName = (r.name || "").replace(/"/g, "&quot;");
 
-            // Hit score — 4 possible points
+            // --- gold star ---
+            const star = window.AppState.screenerSymbols?.has(r.symbol) ? "⭐ " : "";
+            // --- end gold star ---
+
             let points = 0;
             const possible = 4;
             const reasons = [];
@@ -3181,36 +3387,28 @@ window.Tool8 = {
             const fallersPct = parseFloat(localStorage.getItem("fallersSelectPct") || "5");
             const volRatioThreshold = parseFloat(localStorage.getItem("hitVolumeRatio") || "1.5");
 
-            // 1. Large % move
             if (r.change_pct != null && Math.abs(r.change_pct) >= 5) {
                 points++;
                 reasons.push(`Change % ≥ 5% (${r.change_pct.toFixed(1)}%)`);
             }
 
-            // 2. Large £ impact
-            let bigImpact = false;
             if (r.market_cap && r.change_pct != null) {
                 const impact = Math.abs(r.market_cap * r.change_pct / 100);
                 if (impact >= 20_000_000) {
-                    bigImpact = true;
                     points++;
                     reasons.push(`£ impact ≥ £20m (£${(impact/1e6).toFixed(1)}m)`);
                 }
             }
 
-            // 3. Volume ratio
             let volRatioVal = null;
             if (r.volume && r.avg_volume && r.avg_volume > 0) {
                 volRatioVal = r.volume / r.avg_volume;
-            } 
-            // (the async fill will update the display; for Hit we use what we have)
+            }
             if (volRatioVal && volRatioVal >= volRatioThreshold) {
                 points++;
                 reasons.push(`Vol/Avg ≥ ${volRatioThreshold}× (${volRatioVal.toFixed(1)}×)`);
             }
 
-            // 4. RSI 7 oversold on fallers
-            // Placeholder — real RSI fetched below if needed
             if (r.change_pct != null && r.change_pct <= -fallersPct && r.rsi7 != null && r.rsi7 <= 30) {
                 points++;
                 reasons.push(`RSI(7) ≤ 30 (${r.rsi7.toFixed(1)}) on faller`);
@@ -3220,10 +3418,11 @@ window.Tool8 = {
             const hitCls = hitPct >= 75 ? "positive" : hitPct >= 50 ? "" : "negative";
             const hitTitle = reasons.length ? reasons.join("\n") : "No rules matched";
             const hitText = `${hitPct}%`;
-            const highlight = hitPct >= 50 ? 'style="background:rgba(74,222,128,0.12)"' : "";
+            const hitThreshold = parseFloat(localStorage.getItem("hitThreshold") || "50");
+            const highlight = hitPct >= hitThreshold ? 'style="background:rgba(74,222,128,0.12)"' : "";
 
             html += `<tr class="main-row" data-symbol="${r.symbol}" ${highlight}>
-                <td>${buildSymbolLink(r.symbol, indexKey)}</td>
+                <td>${star}${buildSymbolLink(r.symbol, indexKey)}</td>
                 <td title="${fullName}">${shortName}</td>
                 <td>${formatNumber(r.price, "price")}</td>
                 <td class="${cls}">${formatNumber(r.change, "price")}</td>
@@ -3285,42 +3484,6 @@ body {
     display: flex;
     flex-direction: column;
 }
-
-.menubar {
-    background: var(--mid-blue);
-    display: flex;
-    padding: 4px 12px;
-    gap: 20px;
-    border-bottom: 1px solid var(--light-blue);
-}
-
-.menu-item {
-    position: relative;
-    padding: 8px 12px;
-    cursor: pointer;
-}
-
-.menu-item:hover .dropdown { display: block; }
-
-.dropdown {
-    display: none;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    background: var(--mid-blue);
-    min-width: 140px;
-    border: 1px solid var(--light-blue);
-    z-index: 10;
-}
-
-.dropdown a {
-    display: block;
-    padding: 8px 16px;
-    color: var(--text);
-    text-decoration: none;
-}
-
-.dropdown a:hover { background: var(--light-blue); }
 
 .dashboard {
     flex: 1;
@@ -3408,24 +3571,6 @@ body {
     white-space: nowrap;
 }
 
-/* Journey header – centred with full-width accent underline */
-#wl-table th:nth-child(6) {
-    text-align: center;
-    position: relative;
-    border-bottom: 2px solid var(--accent);
-}
-
-#wl-table th input[type="checkbox"],
-#wl-table td input[type="checkbox"] {
-    display: inline-block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    width: 16px;
-    height: 16px;
-    cursor: pointer;
-}
-
-/* No. and Poll columns */
 .data-table td.row-num,
 .data-table td.poll-cell {
     text-align: center;
@@ -3454,9 +3599,10 @@ pre {
     margin-bottom: 10px;
 }
 
-.region-buttons {
+.region-buttons, .left-controls, .right-controls {
     display: flex;
     gap: 6px;
+    align-items: center;
 }
 
 .mini-btn {
@@ -3469,10 +3615,7 @@ pre {
     font-size: 0.8rem;
 }
 
-.mini-btn:hover {
-    background: var(--light-blue);
-}
-
+.mini-btn:hover { background: var(--light-blue); }
 .mini-btn.active {
     background: var(--accent);
     color: white;
@@ -3489,18 +3632,8 @@ pre {
     font-size: 0.85rem;
 }
 
-.region-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-}
-.left-controls { display: flex; align-items: center; gap: 8px; }
-.right-controls { display: flex; gap: 8px; }
-.filter-btn.active { background: var(--accent); }
 tr.positive { background: rgba(0, 180, 0, 0.08); }
 tr.negative { background: rgba(255, 60, 60, 0.08); }
-
 
 .dashboard-overview { max-width: 1100px; }
 .overview-grid {
@@ -3523,49 +3656,19 @@ tr.negative { background: rgba(255, 60, 60, 0.08); }
     font-size: 1.05rem;
     color: var(--accent);
 }
-.overview-card ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-.overview-card li {
-    margin-bottom: 10px;
-    line-height: 1.35;
-}
+.overview-card ul { list-style: none; padding: 0; margin: 0; }
+.overview-card li { margin-bottom: 10px; line-height: 1.35; }
 .overview-card li:last-child { margin-bottom: 0; }
-.overview-card small,
-.overview-card code {
+.overview-card small, .overview-card code {
     color: var(--accent);
     font-size: 0.85em;
-}
-
-.journey {
-    display: grid;
-    grid-template-columns: 72px 70px 80px 1fr;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.8rem;
-    white-space: nowrap;
-}
-
-
-.added-date {
-    color: var(--accent);
-    font-variant-numeric: tabular-nums;
-}
-.added-price {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-}
-.since-added {
-    font-variant-numeric: tabular-nums;
 }
 
 canvas.spark {
     width: 80px;
     height: 24px;
     display: block;
-    background: rgba(0, 0, 0, 0);
+    background: transparent;
 }
 
 /* Search modal */
@@ -3577,13 +3680,11 @@ canvas.spark {
     align-items: center;
     justify-content: center;
 }
-
 .modal-backdrop {
     position: absolute;
     inset: 0;
     background: rgba(0,0,0,0.6);
 }
-
 .modal-box {
     position: relative;
     background: var(--mid-blue);
@@ -3597,7 +3698,6 @@ canvas.spark {
     flex-direction: column;
     gap: 12px;
 }
-
 #search-input {
     padding: 8px 10px;
     border-radius: 4px;
@@ -3605,7 +3705,6 @@ canvas.spark {
     background: var(--dark-blue);
     color: white;
 }
-
 .search-list {
     flex: 1;
     overflow-y: auto;
@@ -3613,56 +3712,26 @@ canvas.spark {
     border-radius: 4px;
     background: var(--dark-blue);
 }
-
 .search-item {
     padding: 8px 10px;
     cursor: pointer;
     border-bottom: 1px solid var(--light-blue);
     user-select: none;
 }
-
-.search-item:hover { 
-    background: var(--light-blue); 
-}
-
-.search-item.selected { 
-    background: var(--accent) !important; 
-    color: white; 
-}
-
+.search-item:hover { background: var(--light-blue); }
+.search-item.selected { background: var(--accent) !important; color: white; }
 .modal-actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
 }
 
-#wl-table thead th input[type="checkbox"] {
-    display: inline-block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    width: 16px !important;
-    height: 16px !important;
-    margin: 4px auto !important;
-    position: static !important;
-    pointer-events: auto !important;
-}
-
-.overview-card small {
-    display: block;
-    margin-top: 4px;
-    line-height: 1.4;
-}
-
-.schema-changed {
-    animation: schemaPulse 1.6s ease-out;
-}
+.schema-changed { animation: schemaPulse 1.6s ease-out; }
 @keyframes schemaPulse {
     0%   { background: rgba(74, 222, 128, 0.25); }
     100% { background: transparent; }
 }
-.schema-rows, .schema-size {
-    font-variant-numeric: tabular-nums;
-}
+.schema-rows, .schema-size { font-variant-numeric: tabular-nums; }
 
 .todo-list { list-style: none; padding: 0; margin: 0; }
 .todo-list > li { margin-bottom: 10px; }
@@ -3683,7 +3752,6 @@ canvas.spark {
     font-family: monospace;
     font-size: 0.85rem;
 }
-
 .run-badge {
     display: inline-block;
     font-size: 0.7rem;
@@ -3699,6 +3767,31 @@ canvas.spark {
     color: var(--accent);
     margin-top: 2px;
 }
+
+/* Settings page */
+.settings-container { max-width: 640px; margin: 40px auto; padding: 0 16px; }
+.settings-container h1 { color: #7fdbff; }
+.settings-container label { display: block; margin: 18px 0 6px; font-weight: 500; }
+.settings-container input,
+.settings-container select {
+    width: 100%; padding: 8px 10px; background: #1b2838;
+    border: 1px solid #2a3f5f; color: white; border-radius: 4px; font-size: 1rem;
+}
+.settings-container button {
+    margin-top: 24px; background: #1e5c3a; color: white; border: none;
+    padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 1rem;
+}
+.settings-container button:hover { background: #2a7a4a; }
+#settings-msg { margin-top: 16px; min-height: 1.4em; color: #4ade80; }
+.settings-container a { color: #7fdbff; }
+
+/* Dashboard cards (injected) */
+.card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 8px; padding: 14px 16px; }
+.card h3 { margin: 0 0 10px 0; color: #7fdbff; font-size: 1.05rem; }
+.section { margin-bottom: 10px; font-size: 0.9rem; line-height: 1.45; }
+.section ul { margin: 4px 0 0 18px; padding: 0; }
+.section li { margin-bottom: 3px; }
 
 ===== FILE: scripts/add_market_cap.py =====
 # scripts/add_market_cap.py
@@ -3909,7 +4002,19 @@ def file_blocks():
 
 prompt = f"""You are continuing development of a local Flask application called ape-stock.
 
-Current goals, tech stack, design decisions and todo items live on the Dashboard page of the running app.
+To gain a complete understanding of ape-stock, it's goals and it's components (tools 1-8) study tool1: 'Dashboard' page and it's contents.
+
+Keep the UK-only focus: FTSE 100 & FTSE 250.
+
+Use small modular changes (shared-core philosophy).
+
+Remove redundant code.
+
+IMPORTANT - If you edit a file: 
+1: Always make sure code is fully documented.
+2: If there is a 'minor' change in part of a function, or block of code, return the complete function (or block of code).
+3: If the edit is more than 'minor' return the complete file.
+4: NEVER return snippets of code.
 
 ===== DIRECTORY STRUCTURE =====
 {build_tree()}
@@ -3917,7 +4022,13 @@ Current goals, tech stack, design decisions and todo items live on the Dashboard
 ===== FILE CONTENTS =====
 {file_blocks()}
 
-Continue from this exact state. Prefer small, modular, well-commented changes. Keep the UK-only focus and the shared-core philosophy.
+
+Continue from this exact state. 
+
+Before anything else:
+1 - Confirm your understanding of ape-stock.
+2 - Any initial questions - Please ask.
+
 """
 
 OUT.write_text(prompt, encoding="utf-8")
@@ -3952,6 +4063,55 @@ rows = cur.fetchall()
 
 if not rows:
     print("daily_closes is empty")
+else:
+    formatted = []
+    for r in rows:
+        line = []
+        for c in cols:
+            val = r[c]
+            if isinstance(val, float):
+                line.append(f"{val:.4f}")
+            else:
+                line.append(str(val) if val is not None else "")
+        formatted.append(line)
+
+    widths = [len(c) for c in cols]
+    for line in formatted:
+        for i, cell in enumerate(line):
+            widths[i] = max(widths[i], len(cell))
+
+    header = "  ".join(c.ljust(widths[i]) for i, c in enumerate(cols))
+    print(header)
+    print("-" * len(header))
+
+    for line in formatted:
+        print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line)))
+
+print(f"\nTotal rows: {len(rows)}")
+conn.close()
+
+===== FILE: scripts/dump_holdings_history.py =====
+# scripts/dump_holdings_history.py
+# DESC: Dump all holdings_history rows in aligned columns
+# RUN: Tool2
+
+import sqlite3
+from pathlib import Path
+
+db_path = Path(__file__).parent.parent / "ape_stock.db"
+conn = sqlite3.connect(db_path, timeout=20)
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+
+cur.execute("PRAGMA table_info(holdings_history)")
+cols = [r[1] for r in cur.fetchall()]
+print("Columns:", cols)
+
+cur.execute(f"SELECT {', '.join(cols)} FROM holdings_history ORDER BY closed_at DESC, id DESC")
+rows = cur.fetchall()
+
+if not rows:
+    print("holdings_history is empty")
 else:
     formatted = []
     for r in rows:
@@ -4031,6 +4191,129 @@ else:
 
 print(f"\nTotal rows: {len(rows)}")
 conn.close()
+
+===== FILE: scripts/exdiv_pre_analysis.py =====
+# scripts/exdiv_pre_analysis.py
+# DESC: Analyse price behaviour in the 5 days before ex-dividend dates
+# RUN: Tool2
+
+import sqlite3
+from pathlib import Path
+from collections import defaultdict
+from datetime import datetime, timedelta
+
+db_path = Path(__file__).parent.parent / "ape_stock.db"
+conn = sqlite3.connect(db_path, timeout=30)
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+
+print("Loading ex-dividend dates...")
+cur.execute("""
+    SELECT symbol, ex_dividend_date, dividend_yield
+    FROM index_quotes
+    WHERE ex_dividend_date IS NOT NULL
+      AND ex_dividend_date != ''
+""")
+exdivs = cur.fetchall()
+
+print("Loading daily closes...")
+cur.execute("""
+    SELECT symbol, date, close
+    FROM daily_closes
+    WHERE close IS NOT NULL
+    ORDER BY symbol, date
+""")
+by_sym = defaultdict(list)
+for r in cur.fetchall():
+    by_sym[r["symbol"]].append((r["date"], r["close"]))
+
+# Build date-indexed lookup per symbol
+sym_dates = {}
+for sym, series in by_sym.items():
+    sym_dates[sym] = {d: c for d, c in series}
+
+print(f"Found {len(exdivs)} symbols with an ex-div date")
+
+# Collect returns for T-5 ... T-1 and a simple control (T-10)
+days_before = [5, 4, 3, 2, 1]
+results = {d: [] for d in days_before}
+control = []
+yield_buckets = {"low": [], "mid": [], "high": []}  # <1%, 1-3%, >3%
+
+events = 0
+for row in exdivs:
+    sym = row["symbol"]
+    ex_str = row["ex_dividend_date"]
+    dy = row["dividend_yield"] or 0
+    if sym not in sym_dates:
+        continue
+    try:
+        ex_dt = datetime.fromisoformat(ex_str[:10]).date()
+    except Exception:
+        continue
+
+    dates = sym_dates[sym]
+    # Find trading days around the ex-date
+    # We need the close on the day before each offset
+    sorted_dates = sorted(dates.keys())
+    # Locate the last trading day strictly before ex_dt
+    pre_dates = [d for d in sorted_dates if d < ex_dt.isoformat()]
+    if len(pre_dates) < 6:
+        continue
+
+    events += 1
+    # T-1 is the last pre_date, T-2 the one before, etc.
+    for offset in days_before:
+        if len(pre_dates) >= offset + 1:
+            d_now = pre_dates[-offset]
+            d_prev = pre_dates[-offset - 1]
+            c_now = dates[d_now]
+            c_prev = dates[d_prev]
+            if c_prev:
+                ret = (c_now - c_prev) / c_prev * 100
+                results[offset].append(ret)
+                # bucket by yield
+                if dy < 1:
+                    yield_buckets["low"].append((offset, ret))
+                elif dy < 3:
+                    yield_buckets["mid"].append((offset, ret))
+                else:
+                    yield_buckets["high"].append((offset, ret))
+
+    # crude control: return on T-10 if available
+    if len(pre_dates) >= 11:
+        d_now = pre_dates[-10]
+        d_prev = pre_dates[-11]
+        c_now = dates[d_now]
+        c_prev = dates[d_prev]
+        if c_prev:
+            control.append((c_now - c_prev) / c_prev * 100)
+
+def stats(vals):
+    if not vals:
+        return 0, 0.0, 0.0
+    avg = sum(vals) / len(vals)
+    wins = sum(1 for v in vals if v > 0) / len(vals) * 100
+    return len(vals), avg, wins
+
+print(f"\nEvents with sufficient history: {events}")
+print(f"{'Days before':>12} {'N':>6} {'Avg%':>8} {'Win%':>7}")
+print("-" * 36)
+for d in days_before:
+    n, avg, win = stats(results[d])
+    print(f"{d:12} {n:6} {avg:8.3f} {win:7.1f}")
+
+n, avg, win = stats(control)
+print(f"{'Control T-10':>12} {n:6} {avg:8.3f} {win:7.1f}")
+
+print("\nBy dividend yield (T-1 only):")
+for label, pairs in yield_buckets.items():
+    t1 = [r for off, r in pairs if off == 1]
+    n, avg, win = stats(t1)
+    print(f"  {label:<5} N={n:4}  Avg={avg:7.3f}%  Win={win:5.1f}%")
+
+conn.close()
+print("\nNote: limited by one year of daily data and a single stored ex-date per symbol.")
 
 ===== FILE: scripts/gap_down_volume.py =====
 # scripts/gap_down_volume.py
@@ -4168,6 +4451,414 @@ for gap in gap_thresholds:
 
 conn.close()
 
+===== FILE: scripts/hit_backtest.py =====
+# scripts/hit_backtest.py
+# DESC: Back-test current Hit rules on 1y daily_closes; measure forward net returns vs control
+# RUN: Tool2
+
+import sqlite3
+from pathlib import Path
+from collections import defaultdict
+
+db_path = Path(__file__).parent.parent / "ape_stock.db"
+conn = sqlite3.connect(db_path, timeout=30)
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+
+# Load current market caps as proxy (note: not historical)
+cur.execute("SELECT symbol, market_cap FROM index_quotes WHERE market_cap IS NOT NULL")
+mkt_caps = {r["symbol"]: r["market_cap"] for r in cur.fetchall()}
+
+# Load all daily data
+cur.execute("""
+    SELECT symbol, date, open, high, low, close, volume
+    FROM daily_closes
+    WHERE close IS NOT NULL AND volume IS NOT NULL
+    ORDER BY symbol, date
+""")
+rows = cur.fetchall()
+
+by_sym = defaultdict(list)
+for r in rows:
+    by_sym[r["symbol"]].append(dict(r))
+
+def calc_rsi(closes, period=7):
+    if len(closes) < period + 1:
+        return None
+    deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+    gains = [d if d > 0 else 0 for d in deltas]
+    losses = [-d if d < 0 else 0 for d in deltas]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+STAMP = 0.005          # 0.5 %
+HIT_THRESHOLD = 50     # % 
+FORWARD_DAYS = [1, 3, 5, 10, 14]
+VOL_RATIO = 1.5
+FALL_PCT = 5.0
+
+print(f"Hit back-test  |  threshold >= {HIT_THRESHOLD}%  |  stamp {STAMP*100:.1f}%")
+print(f"{'Fwd':>4} {'Signals':>8} {'AvgNet%':>9} {'Win%':>7} {'CtrlSig':>8} {'CtrlNet%':>9} {'CtrlWin%':>8}")
+print("-" * 70)
+
+for fwd in FORWARD_DAYS:
+    hit_rets = []
+    ctrl_rets = []
+
+    for sym, data in by_sym.items():
+        if len(data) < 40:
+            continue
+        closes = [d["close"] for d in data]
+        vols = [d["volume"] for d in data]
+
+        for i in range(30, len(data) - fwd):
+            prev_c = data[i-1]["close"]
+            if not prev_c:
+                continue
+            chg_pct = (data[i]["close"] - prev_c) / prev_c * 100
+
+            # Volume ratio
+            window = vols[i-30:i]
+            avg_vol = sum(window) / len(window) if window else 0
+            vol_ratio = data[i]["volume"] / avg_vol if avg_vol else 0
+
+            # RSI
+            rsi = calc_rsi(closes[max(0, i-30):i+1])
+
+            # £ impact (proxy)
+            mkt = mkt_caps.get(sym, 0)
+            impact = abs(mkt * chg_pct / 100) if mkt else 0
+
+            # Hit points (same 4 rules)
+            points = 0
+            if abs(chg_pct) >= 5:
+                points += 1
+            if impact >= 20_000_000:
+                points += 1
+            if vol_ratio >= VOL_RATIO:
+                points += 1
+            if chg_pct <= -FALL_PCT and rsi is not None and rsi <= 30:
+                points += 1
+
+            hit_pct = (points / 4) * 100
+
+            # Forward return from today's close
+            future_c = data[i + fwd]["close"]
+            if not future_c:
+                continue
+            gross = (future_c - data[i]["close"]) / data[i]["close"]
+            net = gross - STAMP
+
+            if hit_pct >= HIT_THRESHOLD and chg_pct < 0:   # fallers only
+                hit_rets.append(net * 100)
+            if chg_pct <= -FALL_PCT:                        # naïve control
+                ctrl_rets.append(net * 100)
+
+    def stats(rets):
+        if not rets:
+            return 0, 0.0, 0.0
+        avg = sum(rets) / len(rets)
+        wins = sum(1 for r in rets if r > 0) / len(rets) * 100
+        return len(rets), avg, wins
+
+    h_n, h_avg, h_win = stats(hit_rets)
+    c_n, c_avg, c_win = stats(ctrl_rets)
+
+    print(f"{fwd:4} {h_n:8} {h_avg:9.2f} {h_win:7.1f} {c_n:8} {c_avg:9.2f} {c_win:8.1f}")
+
+conn.close()
+print("\nNote: £ impact uses current market_cap as proxy. Fallers only for Hit cohort.")
+
+===== FILE: scripts/hit_grid_search.py =====
+# scripts/hit_grid_search.py
+# DESC: Grid-search Hit parameters; report mean, median, trimmed mean + outlier dump
+# RUN: Tool2
+
+import sqlite3
+from pathlib import Path
+from collections import defaultdict
+import itertools
+import statistics
+
+db_path = Path(__file__).parent.parent / "ape_stock.db"
+conn = sqlite3.connect(db_path, timeout=60)
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+
+cur.execute("SELECT symbol, market_cap FROM index_quotes WHERE market_cap IS NOT NULL")
+mkt_caps = {r["symbol"]: r["market_cap"] for r in cur.fetchall()}
+
+cur.execute("""
+    SELECT symbol, date, close, volume
+    FROM daily_closes
+    WHERE close IS NOT NULL AND volume IS NOT NULL
+    ORDER BY symbol, date
+""")
+rows = cur.fetchall()
+
+by_sym = defaultdict(list)
+for r in rows:
+    by_sym[r["symbol"]].append(dict(r))
+
+def calc_rsi(closes, period=7):
+    if len(closes) < period + 1:
+        return None
+    deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+    gains = [max(d, 0) for d in deltas]
+    losses = [max(-d, 0) for d in deltas]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+def trimmed_mean(vals, prop=0.05):
+    if len(vals) < 20:
+        return statistics.mean(vals) if vals else 0.0
+    s = sorted(vals)
+    k = int(len(s) * prop)
+    return statistics.mean(s[k:-k]) if k else statistics.mean(s)
+
+print("Pre-computing daily features...")
+features = []
+for sym, data in by_sym.items():
+    if len(data) < 50:
+        continue
+    closes = [d["close"] for d in data]
+    vols = [d["volume"] for d in data]
+    mkt = mkt_caps.get(sym, 0)
+    for i in range(35, len(data) - 14):
+        prev_c = data[i-1]["close"]
+        if not prev_c or prev_c == 0:
+            continue
+        chg_pct = (data[i]["close"] - prev_c) / prev_c * 100
+        if chg_pct >= 0:
+            continue
+        window = vols[max(0, i-30):i]
+        avg_vol = sum(window) / len(window) if window else 0
+        vol_ratio = data[i]["volume"] / avg_vol if avg_vol else 0
+        rsi = calc_rsi(closes[max(0, i-40):i+1])
+        imp = abs(mkt * chg_pct / 100) if mkt else 0
+        nets = {}
+        for fwd in (5, 10):
+            if i + fwd < len(data):
+                future = data[i + fwd]["close"]
+                if future:
+                    nets[fwd] = ((future - data[i]["close"]) / data[i]["close"] - 0.005) * 100
+        features.append({
+            "sym": sym,
+            "date": data[i]["date"],
+            "chg": chg_pct,
+            "vol": vol_ratio,
+            "rsi": rsi,
+            "imp": imp,
+            "nets": nets,
+            "close": data[i]["close"]
+        })
+
+print(f"Feature rows: {len(features)}")
+
+CHG_PCTS = [5, 6, 7]
+VOL_RATIOS = [1.5, 2.0, None]
+RSI_LEVELS = [30, None]
+HIT_REQS = [50, 75, 100]
+IMPACT_LEVELS = [None, 20_000_000]
+FORWARDS = [5, 10]
+
+results = []
+best_trades = []          # keep the actual trades of the eventual winner
+combos = list(itertools.product(CHG_PCTS, VOL_RATIOS, RSI_LEVELS, HIT_REQS, IMPACT_LEVELS))
+print(f"Testing {len(combos)} parameter sets...")
+
+for idx, (chg, vol_r, rsi_l, hit_req, impact) in enumerate(combos):
+    if idx % 20 == 0:
+        print(f"  {idx}/{len(combos)}", flush=True)
+    for fwd in FORWARDS:
+        hit_rets = []
+        hit_trades = []
+        ctrl_rets = []
+        for f in features:
+            net = f["nets"].get(fwd)
+            if net is None:
+                continue
+            if f["chg"] <= -5:
+                ctrl_rets.append(net)
+
+            points = 0
+            possible = 0
+            possible += 1
+            if abs(f["chg"]) >= chg:
+                points += 1
+            if vol_r is not None:
+                possible += 1
+                if f["vol"] >= vol_r:
+                    points += 1
+            if rsi_l is not None:
+                possible += 1
+                if f["chg"] <= -chg and f["rsi"] is not None and f["rsi"] <= rsi_l:
+                    points += 1
+            if impact is not None:
+                possible += 1
+                if f["imp"] >= impact:
+                    points += 1
+            if possible and (points / possible * 100) >= hit_req:
+                hit_rets.append(net)
+                hit_trades.append((f["sym"], f["date"], f["chg"], net, f["close"]))
+
+        if len(hit_rets) < 30:
+            continue
+        h_avg = statistics.mean(hit_rets)
+        h_med = statistics.median(hit_rets)
+        h_trim = trimmed_mean(hit_rets)
+        h_win = sum(1 for r in hit_rets if r > 0) / len(hit_rets) * 100
+        c_avg = statistics.mean(ctrl_rets) if ctrl_rets else 0
+        edge = h_avg - c_avg
+        results.append({
+            "fwd": fwd, "chg": chg,
+            "vol": vol_r if vol_r else "off",
+            "rsi": rsi_l if rsi_l else "off",
+            "hit": hit_req,
+            "imp": "20m" if impact else "off",
+            "n": len(hit_rets),
+            "avg": h_avg, "med": h_med, "trim": h_trim,
+            "win": h_win, "c_avg": c_avg, "edge": edge,
+            "trades": hit_trades
+        })
+
+results.sort(key=lambda x: (x["edge"], x["avg"]), reverse=True)
+
+print(f"\nTop 15 parameter sets (ranked by mean edge)\n")
+print(f"{'Fwd':>3} {'Chg':>3} {'Vol':>5} {'RSI':>4} {'Hit':>3} {'Imp':>4} "
+      f"{'N':>5} {'Mean':>7} {'Med':>7} {'Trim':>7} {'Win%':>6} {'Ctrl':>7} {'Edge':>7}")
+print("-" * 85)
+for r in results[:15]:
+    print(f"{r['fwd']:3} {r['chg']:3} {str(r['vol']):>5} {str(r['rsi']):>4} {r['hit']:3} {r['imp']:>4} "
+          f"{r['n']:5} {r['avg']:7.2f} {r['med']:7.2f} {r['trim']:7.2f} {r['win']:6.1f} "
+          f"{r['c_avg']:7.2f} {r['edge']:7.2f}")
+
+# Outlier dump for the single best set
+if results:
+    best = results[0]
+    trades = sorted(best["trades"], key=lambda t: t[3], reverse=True)
+    print(f"\n=== Outlier dump for best set ===")
+    print(f"Fwd={best['fwd']} Chg>={best['chg']} Vol={best['vol']} RSI={best['rsi']} "
+          f"Hit>={best['hit']} Imp={best['imp']}  N={best['n']}")
+    print("\nTop 8 winners:")
+    print(f"{'Symbol':<10} {'Date':<12} {'Fall%':>7} {'Net%':>8} {'Close':>8}")
+    for t in trades[:8]:
+        print(f"{t[0]:<10} {t[1]:<12} {t[2]:7.1f} {t[3]:8.1f} {t[4]:8.2f}")
+    print("\nBottom 8 losers:")
+    for t in trades[-8:]:
+        print(f"{t[0]:<10} {t[1]:<12} {t[2]:7.1f} {t[3]:8.1f} {t[4]:8.2f}")
+
+print(f"\nTotal result rows: {len(results)}")
+conn.close()
+
+===== FILE: scripts/intraday_bounce.py =====
+# scripts/intraday_bounce.py
+# DESC: Realistic-entry test of same-day/next-day bounce after large intraday drops (snapshots_5min)
+# RUN: Tool2
+
+import sqlite3
+from pathlib import Path
+from collections import defaultdict
+from datetime import datetime
+
+db_path = Path(__file__).parent.parent / "ape_stock.db"
+conn = sqlite3.connect(db_path, timeout=30)
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+
+print("Loading 5-min snapshots...")
+cur.execute("""
+    SELECT symbol, ts, price
+    FROM snapshots_5min
+    WHERE price IS NOT NULL
+    ORDER BY symbol, ts
+""")
+rows = cur.fetchall()
+
+by_sym_date = defaultdict(lambda: defaultdict(list))
+for r in rows:
+    try:
+        dt = datetime.fromisoformat(r["ts"])
+        date_str = dt.date().isoformat()
+        by_sym_date[r["symbol"]][date_str].append((dt, r["price"]))
+    except Exception:
+        continue
+
+print(f"Symbols with data: {len(by_sym_date)}")
+
+DROP_PCTS = [5, 6, 7, 8]
+STAMP = 0.5  # percent
+
+results = {p: {"signals": 0, "same_day": [], "next_day": []} for p in DROP_PCTS}
+
+for sym, dates in by_sym_date.items():
+    sorted_dates = sorted(dates.keys())
+    for i, date in enumerate(sorted_dates):
+        bars = sorted(dates[date])
+        if len(bars) < 8:
+            continue
+        prices = [b[1] for b in bars]
+        day_open = prices[0]
+
+        # Find first bar that crosses each drop threshold from the open
+        for thresh in DROP_PCTS:
+            entry_price = None
+            for p in prices:
+                drop = (p - day_open) / day_open * 100 if day_open else 0
+                if drop <= -thresh:
+                    entry_price = p          # buy at the close of this 5-min bar
+                    break
+            if entry_price is None:
+                continue
+
+            results[thresh]["signals"] += 1
+            day_close = prices[-1]
+
+            # same-day net from realistic entry
+            same_gross = (day_close - entry_price) / entry_price * 100
+            results[thresh]["same_day"].append(same_gross - STAMP)
+
+            # next-day close
+            if i + 1 < len(sorted_dates):
+                next_bars = sorted(dates[sorted_dates[i + 1]])
+                if next_bars:
+                    next_close = next_bars[-1][1]
+                    next_gross = (next_close - entry_price) / entry_price * 100
+                    results[thresh]["next_day"].append(next_gross - STAMP)
+
+print("\nRealistic entry (first 5-min bar that crosses drop from open) after 0.5% stamp")
+print(f"{'Drop>=':>7} {'Signals':>8} {'SameDay Avg%':>13} {'SameDay Med%':>13} "
+      f"{'NextDay Avg%':>13} {'NextDay Med%':>13}")
+print("-" * 75)
+
+for thresh in DROP_PCTS:
+    r = results[thresh]
+    def avg(xs): return sum(xs) / len(xs) if xs else 0
+    def med(xs):
+        if not xs: return 0
+        s = sorted(xs)
+        return s[len(s) // 2]
+    print(f"{thresh:7} {r['signals']:8} {avg(r['same_day']):13.2f} {med(r['same_day']):13.2f} "
+          f"{avg(r['next_day']):13.2f} {med(r['next_day']):13.2f}")
+
+conn.close()
+print("\nEntry = close of the 5-min bar that first reaches the drop threshold from the day's open.")
+print("Returns are net of 0.5% stamp. Spread/slippage not included.")
+
 ===== FILE: scripts/list_yahoo_sectors.py =====
 # scripts/list_yahoo_sectors.py
 # DESC: List all Yahoo Finance sectors and their industries
@@ -4302,6 +4993,350 @@ if rows:
 
 conn.close()
 
+===== FILE: scripts/screener_analyse_target_stop_backtest.py =====
+# scripts/screener_analyse_target_stop_backtest.py
+# DESC: Focused grid-search of Screener target/stop with ranking filter
+# RUN: From venv/cmd
+
+import sqlite3
+from pathlib import Path
+from collections import defaultdict
+import itertools
+
+db_path = Path(__file__).parent.parent / "ape_stock.db"
+
+print("Screener target/stop focused grid (restrict = yes)")
+print("-" * 50)
+
+# --- load data once ---
+conn = sqlite3.connect(db_path, timeout=60)
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+
+print("Loading daily closes...")
+cur.execute("""
+    SELECT symbol, date, close
+    FROM daily_closes
+    WHERE close IS NOT NULL
+    ORDER BY symbol, date
+""")
+by_sym = defaultdict(list)
+all_dates = set()
+for r in cur.fetchall():
+    by_sym[r["symbol"]].append((r["date"], r["close"]))
+    all_dates.add(r["date"])
+
+cur.execute("SELECT symbol, market_cap FROM index_quotes")
+meta = {r["symbol"]: r["market_cap"] for r in cur.fetchall()}
+conn.close()
+
+sorted_dates = sorted(all_dates)
+start_idx = next((i for i, d in enumerate(sorted_dates) if d >= "2026-02-01"), 0)
+
+def build_screener(as_of_date):
+    candidates = []
+    for sym, series in by_sym.items():
+        closes = [c for d, c in series if d <= as_of_date]
+        n = len(closes)
+        if n < 200:
+            continue
+        ret_3m = (closes[-1] / closes[-63] - 1) * 100 if n > 63 and closes[-63] else None
+        if ret_3m is None or ret_3m <= -15:
+            continue
+        ma50 = sum(closes[-50:]) / 50
+        ma200 = sum(closes[-200:]) / 200
+        if closes[-1] <= ma50 or closes[-1] <= ma200:
+            continue
+        mcap = meta.get(sym)
+        if mcap is not None and mcap < 2_000_000_000:
+            continue
+        candidates.append((sym, ret_3m, closes[-1]))
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return candidates
+
+def compute_scores(rank_n):
+    scores = defaultdict(int)
+    for i in range(start_idx, len(sorted_dates)):
+        today = sorted_dates[i]
+        screener = build_screener(today)
+        for sym, _, _ in screener[:rank_n]:
+            scores[sym] += 1
+    return set(scores.keys())
+
+def run_simulation(ranked_set, target_pct, stop_pct):
+    positions = {}
+    trades = []
+    notional = 500.0
+    stamp = 0.005
+
+    for i in range(start_idx, len(sorted_dates)):
+        today = sorted_dates[i]
+        screener = build_screener(today)
+
+        to_close = []
+        for sym, (entry, entry_date, shares) in list(positions.items()):
+            series = by_sym.get(sym, [])
+            today_close = next((c for d, c in series if d == today), None)
+            if today_close is None:
+                continue
+            ret = (today_close / entry - 1) * 100
+            if ret >= target_pct or ret <= -stop_pct:
+                gross = shares * today_close
+                cost = notional * (1 + stamp)
+                pnl = gross - cost
+                trades.append(pnl)
+                to_close.append(sym)
+        for sym in to_close:
+            del positions[sym]
+
+        for sym, _, price in screener:
+            if sym in positions or sym not in ranked_set:
+                continue
+            shares = notional / price
+            positions[sym] = (price, today, shares)
+
+    last_date = sorted_dates[-1]
+    for sym, (entry, entry_date, shares) in positions.items():
+        series = by_sym.get(sym, [])
+        last_close = series[-1][1] if series else entry
+        gross = shares * last_close
+        cost = notional * (1 + stamp)
+        trades.append(gross - cost)
+
+    if not trades:
+        return 0, 0.0, 0.0
+    wins = sum(1 for p in trades if p > 0)
+    total_pnl = sum(trades)
+    return len(trades), wins / len(trades) * 100, total_pnl
+
+# --- focused grid ---
+rank_ns = [5, 10, 15]
+targets = [5, 6, 7, 8, 10, 12]
+stops = [4, 5, 6, 8, 10]
+
+print(f"Grid: {len(rank_ns)} ranks × {len(targets)} targets × {len(stops)} stops = {len(rank_ns)*len(targets)*len(stops)} runs\n")
+
+results = []
+for rank_n in rank_ns:
+    print(f"Ranking top-{rank_n}...")
+    ranked_set = compute_scores(rank_n)
+    for target, stop in itertools.product(targets, stops):
+        n_trades, win_rate, total_pnl = run_simulation(ranked_set, target, stop)
+        results.append({
+            "rank_n": rank_n,
+            "target": target,
+            "stop": stop,
+            "trades": n_trades,
+            "win_rate": win_rate,
+            "pnl": total_pnl,
+            "roi": total_pnl / 500 * 100
+        })
+
+results.sort(key=lambda x: x["pnl"], reverse=True)
+
+print("\n=== Top 15 parameter sets (by total P&L) ===")
+print(f"{'Rank':>4} {'Target':>7} {'Stop':>6} {'Trades':>7} {'Win%':>6} {'P&L':>10} {'ROI%':>7}")
+print("-" * 55)
+for r in results[:15]:
+    print(f"{r['rank_n']:>4} {r['target']:>7} {r['stop']:>6} {r['trades']:>7} {r['win_rate']:>6.1f} {r['pnl']:>10.0f} {r['roi']:>7.1f}")
+
+print(f"\nTotal combinations tested: {len(results)}")
+print("Done.")
+
+===== FILE: scripts/screener_target_stop_backtest.py =====
+# scripts/screener_target_stop_backtest.py
+# DESC: Back-test Screener entries with optional ranking filter and target/stop exits
+# RUN: From venv/cmd (interactive prompts)
+
+import sqlite3
+from pathlib import Path
+from collections import defaultdict
+from datetime import datetime
+
+db_path = Path(__file__).parent.parent / "ape_stock.db"
+
+# --- prompts ---
+print("Screener target/stop back-test")
+print("-" * 40)
+
+rank_n = 0
+try:
+    rank_input = input("Ranking top-N (5/10/15/20, or 0 to skip): ").strip()
+    if rank_input in ("5", "10", "15", "20"):
+        rank_n = int(rank_input)
+except Exception:
+    rank_n = 0
+
+restrict = False
+if rank_n > 0:
+    r = input("Restrict buys to names that ranked in the top N? (y/n): ").strip().lower()
+    restrict = r.startswith("y")
+
+try:
+    target_pct = float(input("Profit target % (e.g. 10): ") or "10")
+    stop_pct = float(input("Stop loss % (e.g. 3): ") or "3")
+except Exception:
+    target_pct = 10.0
+    stop_pct = 3.0
+
+print(f"\nSettings: ranking={rank_n or 'off'}, restrict={restrict}, target=+{target_pct}%, stop=-{stop_pct}%\n")
+
+# --- load data ---
+conn = sqlite3.connect(db_path, timeout=60)
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+
+print("Loading daily closes...")
+cur.execute("""
+    SELECT symbol, date, close
+    FROM daily_closes
+    WHERE close IS NOT NULL
+    ORDER BY symbol, date
+""")
+by_sym = defaultdict(list)
+all_dates = set()
+for r in cur.fetchall():
+    by_sym[r["symbol"]].append((r["date"], r["close"]))
+    all_dates.add(r["date"])
+
+cur.execute("SELECT symbol, market_cap FROM index_quotes")
+meta = {r["symbol"]: r["market_cap"] for r in cur.fetchall()}
+conn.close()
+
+sorted_dates = sorted(all_dates)
+start_idx = next((i for i, d in enumerate(sorted_dates) if d >= "2026-02-01"), 0)
+
+def build_screener(as_of_date):
+    candidates = []
+    for sym, series in by_sym.items():
+        closes = [c for d, c in series if d <= as_of_date]
+        n = len(closes)
+        if n < 200:
+            continue
+        ret_3m = (closes[-1] / closes[-63] - 1) * 100 if n > 63 and closes[-63] else None
+        if ret_3m is None or ret_3m <= -15:
+            continue
+        ma50 = sum(closes[-50:]) / 50
+        ma200 = sum(closes[-200:]) / 200
+        if closes[-1] <= ma50 or closes[-1] <= ma200:
+            continue
+        mcap = meta.get(sym)
+        if mcap is not None and mcap < 2_000_000_000:
+            continue
+        candidates.append((sym, ret_3m, closes[-1]))
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return candidates
+
+# --- ranking pass ---
+scores = defaultdict(int)
+if rank_n > 0:
+    print("Computing ranking scores...")
+    for i in range(start_idx, len(sorted_dates)):
+        today = sorted_dates[i]
+        screener = build_screener(today)
+        for sym, _, _ in screener[:rank_n]:
+            scores[sym] += 1
+    print("\n=== Ranking leader-board ===")
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    print(f"{'Symbol':<10} {'Days in top '+str(rank_n):>16}")
+    print("-" * 28)
+    for sym, sc in ranked[:30]:
+        print(f"{sym:<10} {sc:>16}")
+    print()
+
+ranked_set = set(scores.keys()) if rank_n > 0 else set()
+
+# --- trading simulation ---
+def run_simulation(use_restrict):
+    positions = {}  # symbol -> (entry_price, entry_date, shares)
+    trades = []
+    notional = 500.0
+    stamp = 0.005
+
+    for i in range(start_idx, len(sorted_dates)):
+        today = sorted_dates[i]
+        screener = build_screener(today)
+
+        # exits
+        to_close = []
+        for sym, (entry, entry_date, shares) in list(positions.items()):
+            series = by_sym.get(sym, [])
+            today_close = next((c for d, c in series if d == today), None)
+            if today_close is None:
+                continue
+            ret = (today_close / entry - 1) * 100
+            if ret >= target_pct or ret <= -stop_pct:
+                gross = shares * today_close
+                cost = notional * (1 + stamp)
+                pnl = gross - cost
+                trades.append({
+                    "symbol": sym,
+                    "entry_date": entry_date,
+                    "exit_date": today,
+                    "ret": ret,
+                    "pnl": pnl,
+                    "reason": "target" if ret >= target_pct else "stop"
+                })
+                to_close.append(sym)
+        for sym in to_close:
+            del positions[sym]
+
+        # entries
+        for sym, ret_3m, price in screener:
+            if sym in positions:
+                continue
+            if use_restrict and sym not in ranked_set:
+                continue
+            shares = notional / price
+            positions[sym] = (price, today, shares)
+
+    # force-close remaining
+    last_date = sorted_dates[-1]
+    for sym, (entry, entry_date, shares) in positions.items():
+        series = by_sym.get(sym, [])
+        last_close = series[-1][1] if series else entry
+        ret = (last_close / entry - 1) * 100
+        gross = shares * last_close
+        cost = notional * (1 + stamp)
+        pnl = gross - cost
+        trades.append({
+            "symbol": sym,
+            "entry_date": entry_date,
+            "exit_date": last_date,
+            "ret": ret,
+            "pnl": pnl,
+            "reason": "open"
+        })
+    return trades
+
+def print_results(trades, label):
+    print(f"\n=== {label} (+{target_pct}% / -{stop_pct}%) ===")
+    print(f"Trades: {len(trades)}")
+    if not trades:
+        print("No trades.")
+        return
+    wins = [t for t in trades if t["pnl"] > 0]
+    total_pnl = sum(t["pnl"] for t in trades)
+    print(f"Win rate: {len(wins)/len(trades)*100:.1f}%")
+    print(f"Total P&L: £{total_pnl:.2f}")
+    print(f"ROI on £500 base: {total_pnl/500*100:.1f}%")
+    print("\nTop 5 winners:")
+    for t in sorted(trades, key=lambda x: x["pnl"], reverse=True)[:5]:
+        print(f"  {t['symbol']} {t['entry_date']} → {t['exit_date']}  {t['ret']:+.1f}%  £{t['pnl']:+.2f} ({t['reason']})")
+    print("\nTop 5 losers:")
+    for t in sorted(trades, key=lambda x: x["pnl"])[:5]:
+        print(f"  {t['symbol']} {t['entry_date']} → {t['exit_date']}  {t['ret']:+.1f}%  £{t['pnl']:+.2f} ({t['reason']})")
+
+print("Running simulations...")
+unrestricted = run_simulation(use_restrict=False)
+print_results(unrestricted, "Unrestricted")
+
+if restrict:
+    restricted = run_simulation(use_restrict=True)
+    print_results(restricted, f"Restricted to top-{rank_n} ranked names")
+
+print("\nDone.")
+
 ===== FILE: scripts/update_fundamentals.py =====
 # scripts/update_fundamentals.py
 # DESC: Fill sector, industry, market cap, PE, yields, dates and other fundamentals
@@ -4408,6 +5443,140 @@ conn.commit()
 conn.close()
 print(f"Done. Updated {updated} symbols.")
 
+===== FILE: scripts/update_screener_metrics.py =====
+# scripts/update_screener_metrics.py
+# DESC: Compute and store screener metrics (returns, MAs, volatility, sector-relative) for all constituents
+# RUN: Tool2
+
+import sqlite3
+from pathlib import Path
+from collections import defaultdict
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import math
+
+UK = ZoneInfo("Europe/London")
+db_path = Path(__file__).parent.parent / "ape_stock.db"
+conn = sqlite3.connect(db_path, timeout=60)
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+
+# Ensure columns exist
+columns = [
+    ("ret_3m", "REAL"), ("ret_6m", "REAL"), ("dist_52w_high", "REAL"),
+    ("above_50ma", "INTEGER"), ("pct_from_50ma", "REAL"),
+    ("above_200ma", "INTEGER"), ("pct_from_200ma", "REAL"),
+    ("vol_20d", "REAL"), ("sector_rel_1d", "REAL"), ("sector_rel_5d", "REAL"),
+]
+for col, typ in columns:
+    try:
+        cur.execute(f"ALTER TABLE index_quotes ADD COLUMN {col} {typ}")
+    except sqlite3.OperationalError:
+        pass
+conn.commit()
+
+print("Loading daily closes...")
+cur.execute("""
+    SELECT symbol, date, close
+    FROM daily_closes
+    WHERE close IS NOT NULL
+    ORDER BY symbol, date
+""")
+by_sym = defaultdict(list)
+for r in cur.fetchall():
+    by_sym[r["symbol"]].append(r["close"])
+
+print("Loading sectors...")
+cur.execute("SELECT symbol, sector FROM index_quotes WHERE sector IS NOT NULL")
+sectors = {r["symbol"]: r["sector"] for r in cur.fetchall()}
+
+print("Computing...")
+updates = []
+sector_1d = defaultdict(list)
+sector_5d = defaultdict(list)
+
+for sym, closes in by_sym.items():
+    n = len(closes)
+    if n < 30:
+        continue
+
+    ret_3m = (closes[-1] / closes[-63] - 1) * 100 if n > 63 and closes[-63] else None
+    ret_6m = (closes[-1] / closes[-126] - 1) * 100 if n > 126 and closes[-126] else None
+
+    lookback = min(252, n)
+    high_52w = max(closes[-lookback:])
+    dist_52w = (closes[-1] / high_52w - 1) * 100 if high_52w else None
+
+    def sma(p):
+        return sum(closes[-p:]) / p if n >= p else None
+
+    ma50 = sma(50)
+    ma200 = sma(200)
+    above_50 = 1 if ma50 and closes[-1] > ma50 else 0
+    pct_50 = (closes[-1] / ma50 - 1) * 100 if ma50 else None
+    above_200 = 1 if ma200 and closes[-1] > ma200 else 0
+    pct_200 = (closes[-1] / ma200 - 1) * 100 if ma200 else None
+
+    vol_20d = None
+    if n >= 21:
+        rets = [(closes[i] / closes[i-1] - 1) for i in range(n-20, n) if closes[i-1]]
+        if rets:
+            mean = sum(rets) / len(rets)
+            var = sum((r - mean)**2 for r in rets) / len(rets)
+            vol_20d = math.sqrt(var) * 100
+
+    ret_1d = (closes[-1] / closes[-2] - 1) * 100 if n >= 2 and closes[-2] else None
+    ret_5d = (closes[-1] / closes[-6] - 1) * 100 if n >= 6 and closes[-6] else None
+
+    sector = sectors.get(sym)
+    if sector and ret_1d is not None:
+        sector_1d[sector].append(ret_1d)
+    if sector and ret_5d is not None:
+        sector_5d[sector].append(ret_5d)
+
+    updates.append((
+        ret_3m, ret_6m, dist_52w,
+        above_50, pct_50, above_200, pct_200,
+        vol_20d, None, None,
+        sym, ret_1d, ret_5d, sector
+    ))
+
+avg_1d = {s: sum(v)/len(v) for s, v in sector_1d.items() if v}
+avg_5d = {s: sum(v)/len(v) for s, v in sector_5d.items() if v}
+
+print(f"Writing {len(updates)} rows...")
+batch = []
+for u in updates:
+    ret_3m, ret_6m, dist_52w, above_50, pct_50, above_200, pct_200, vol_20d, _, _, sym, ret_1d, ret_5d, sector = u
+    rel_1d = (ret_1d - avg_1d[sector]) if sector and ret_1d is not None and sector in avg_1d else None
+    rel_5d = (ret_5d - avg_5d[sector]) if sector and ret_5d is not None and sector in avg_5d else None
+    batch.append((
+        ret_3m, ret_6m, dist_52w,
+        above_50, pct_50, above_200, pct_200,
+        vol_20d, rel_1d, rel_5d, sym
+    ))
+
+cur.executemany("""
+    UPDATE index_quotes
+    SET ret_3m=?, ret_6m=?, dist_52w_high=?,
+        above_50ma=?, pct_from_50ma=?,
+        above_200ma=?, pct_from_200ma=?,
+        vol_20d=?, sector_rel_1d=?, sector_rel_5d=?
+    WHERE symbol=?
+""", batch)
+
+# Record timestamp
+now = datetime.now(UK).isoformat()
+cur.execute("""
+    INSERT INTO app_settings (key, value)
+    VALUES ('screener_metrics_updated', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+""", (now,))
+
+conn.commit()
+conn.close()
+print("Done. Screener metrics updated.")
+
 ===== FILE: scripts/update_sectors.py =====
 # scripts/update_sectors.py
 # DESC: Early version – fill sector and industry only
@@ -4466,5 +5635,14 @@ conn.commit()
 conn.close()
 print(f"Done. Updated {updated} symbols.")
 
+------
 
-Continue from this exact state. Prefer small, modular, well-commented changes. Keep the UK-only focus and the shared-core philosophy.
+Our last work involved running screener_target_stop_backtest.py script and figuring out how to integrate the results into ape-stock.
+
+Continue from this exact state. 
+
+Before anything else:
+1 - Confirm your understanding of ape-stock.
+2 - Any initial questions - Please ask.
+
+Welcome to the ape-stock dev team! 😉

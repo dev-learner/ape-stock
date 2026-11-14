@@ -40,19 +40,19 @@ window.Tool4 = {
             <table class="data-table" id="screener-table">
                 <thead>
                     <tr>
-                        <th title="Ticker symbol">Symbol</th>
-                        <th title="Company name">Name</th>
-                        <th title="Sector">Sector</th>
-                        <th title="Latest price">Price</th>
-                        <th title="Today's percentage change">Day %</th>
-                        <th title="3-month return">3m %</th>
-                        <th title="6-month return">6m %</th>
-                        <th title="Distance from 52-week high (0 = at the high)">Dist 52w</th>
-                        <th title="Percentage above/below 50-day MA">vs 50MA</th>
-                        <th title="Percentage above/below 200-day MA">vs 200MA</th>
-                        <th title="20-day realised volatility">Vol 20d</th>
-                        <th title="1-day return relative to sector">Sec 1d</th>
-                        <th title="5-day return relative to sector">Sec 5d</th>
+                        <th data-key="symbol" title="Ticker symbol">Symbol</th>
+                        <th data-key="name" title="Company name">Name</th>
+                        <th data-key="sector" title="Sector">Sector</th>
+                        <th data-key="price" title="Latest price">Price</th>
+                        <th data-key="change_pct" title="Today's percentage change">Day %</th>
+                        <th data-key="ret_3m" title="3-month return">3m %</th>
+                        <th data-key="ret_6m" title="6-month return">6m %</th>
+                        <th data-key="dist_52w_high" title="Distance from 52-week high (0 = at the high)">Dist 52w</th>
+                        <th data-key="pct_from_50ma" title="Percentage above/below 50-day MA">vs 50MA</th>
+                        <th data-key="pct_from_200ma" title="Percentage above/below 200-day MA">vs 200MA</th>
+                        <th data-key="vol_20d" title="20-day realised volatility">Vol 20d</th>
+                        <th data-key="sector_rel_1d" title="1-day return relative to sector">Sec 1d</th>
+                        <th data-key="sector_rel_5d" title="5-day return relative to sector">Sec 5d</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -110,8 +110,39 @@ window.Tool4 = {
             alert(`Processed ${added} name(s)`);
         });
 
+        const table = document.getElementById("screener-table");
         if (window.makeTableSortable) {
-            makeTableSortable(document.getElementById("screener-table"));
+            makeTableSortable(table, {
+                onSort: (key, dir) => this.updateDefaultHighlight(key, dir)
+            });
+        }
+
+        // Apply default sort: 3m % descending
+        this.applyDefaultSort(table);
+    },
+
+    applyDefaultSort(table) {
+        const th = table.querySelector('th[data-key="ret_3m"]');
+        if (!th) return;
+        // Simulate two clicks so it ends on descending (first click = asc, second = desc)
+        th.click();
+        th.click();
+        this.updateDefaultHighlight("ret_3m", -1);
+    },
+
+    updateDefaultHighlight(key, dir) {
+        const table = document.getElementById("screener-table");
+        if (!table) return;
+        const defaultTh = table.querySelector('th[data-key="ret_3m"]');
+        if (!defaultTh) return;
+
+        const isDefault = (key === "ret_3m" && dir === -1);
+        if (isDefault) {
+            defaultTh.style.background = "";
+            // defaultTh.style.boxShadow = "";
+        } else {
+            defaultTh.style.background = "rgba(248, 113, 113, 0.25)";
+            // defaultTh.style.boxShadow = "inset 0 0 0 2px #f87171";
         }
     },
 

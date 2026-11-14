@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ape-stock</title>
-    <link rel="stylesheet" href="/static/style.css?v=8">
+    <link rel="stylesheet" href="/static/style.css?v=10">
 </head>
 <body>
 <div id="status-bar" style="background:#0d1b2a; color:#7fdbff; padding:6px 16px; font-size:0.85rem; display:flex; justify-content:space-between; align-items:center;">
@@ -14,8 +14,11 @@
 </div>
 
     <div class="dashboard">
-        <div class="left-column">
-            <h2>Tools</h2>
+        <div class="left-column" id="left-column">
+            <div class="toolbar-header">
+                <h2>Tools</h2>
+                <button id="toolbar-toggle" class="toolbar-toggle" title="Collapse toolbar" aria-label="Collapse toolbar">&laquo;</button>
+            </div>
             <button data-tool="dashboard">Dashboard</button>
             <button data-tool="2">Ad-Hoc Scripts</button>
             <button data-tool="3">Holdings Tracker</button>
@@ -24,7 +27,8 @@
             <button data-tool="6">6</button>
             <button data-tool="7">Rules</button>
             <button data-tool="8">Risers / Fallers</button>
-            <button id="settings-btn" style="background:#1e5c3a; margin-top:12px;">Settings</button>
+            <button data-tool="9" style="background:#1e5c3a; margin-top:12px;">Settings</button>
+            <button data-tool="10" style="background:#1e5c3a;">Admin</button>
             <button id="exit-btn" style="background:#5c2a2a;">Exit</button>
         </div>
         <div class="right-column" id="results">
@@ -32,43 +36,38 @@
         </div>
     </div>
 
-    <script src="/static/js/core.js?v=8"></script>
-    <script src="/static/js/tool2.js?v=8"></script>
-    <script src="/static/js/tool3.js?v=8"></script>
-    <script src="/static/js/tool4.js?v=8"></script>
-    <script src="/static/js/tool6.js?v=8"></script>
-    <script src="/static/js/tool7.js?v=8"></script>
-    <script src="/static/js/tool8.js?v=8"></script>
-    <script src="/static/js/dashboard.js?v=8"></script>
+    <script src="/static/js/core.js?v=10"></script>
+    <script src="/static/js/tool2.js?v=10"></script>
+    <script src="/static/js/tool3.js?v=10"></script>
+    <script src="/static/js/tool4.js?v=10"></script>
+    <script src="/static/js/tool6.js?v=10"></script>
+    <script src="/static/js/tool7.js?v=10"></script>
+    <script src="/static/js/tool8.js?v=10"></script>
+    <script src="/static/js/tool9.js?v=10"></script>
+    <script src="/static/js/tool10.js?v=10"></script>
+    <script src="/static/js/dashboard.js?v=10"></script>
 
     <script>
         document.querySelectorAll("[data-tool]").forEach(el => {
             el.addEventListener("click", e => {
                 e.preventDefault();
                 const id = el.dataset.tool;
-                console.log("clicked tool", id, "Tool2 exists:", !!window.Tool2);
                 window.AppState.currentTool = id;
-                if (id === "2" && window.Tool2) {
-                    console.log("calling Tool2.show()");
-                    window.Tool2.show();
-                }
+                if (id === "2" && window.Tool2) window.Tool2.show();
                 else if (id === "3" && window.Tool3) window.Tool3.show();
                 else if (id === "4" && window.Tool4) window.Tool4.show();
                 else if (id === "6" && window.Tool6) window.Tool6.show();
                 else if (id === "7" && window.Tool7) window.Tool7.show();
                 else if (id === "8" && window.Tool8) window.Tool8.show();
+                else if (id === "9" && window.Tool9) window.Tool9.show();
+                else if (id === "10" && window.Tool10) window.Tool10.show();
                 else if (id === "dashboard") {
                     if (window.Dashboard) window.Dashboard.show();
                 }
                 else {
-                    console.log("falling through to Dashboard");
-                    window.Dashboard.show();
+                    if (window.Dashboard) window.Dashboard.show();
                 }
             });
-        });
-
-        document.getElementById("settings-btn").addEventListener("click", () => {
-            location.href = "/settings";
         });
 
         document.getElementById("exit-btn").addEventListener("click", () => {
@@ -79,6 +78,28 @@
                 }, 150);
             }
         });
+
+        // Toolbar collapse / expand
+        (function initToolbarToggle() {
+            const left = document.getElementById("left-column");
+            const toggle = document.getElementById("toolbar-toggle");
+            const KEY = "ape-toolbar-collapsed";
+
+            function setCollapsed(collapsed, persist = true) {
+                left.classList.toggle("collapsed", collapsed);
+                toggle.innerHTML = collapsed ? "&raquo;" : "&laquo;";
+                toggle.title = collapsed ? "Expand toolbar" : "Collapse toolbar";
+                toggle.setAttribute("aria-label", collapsed ? "Expand toolbar" : "Collapse toolbar");
+                if (persist) localStorage.setItem(KEY, collapsed ? "1" : "0");
+            }
+
+            const wasCollapsed = localStorage.getItem(KEY) === "1";
+            setCollapsed(wasCollapsed, false);
+
+            toggle.addEventListener("click", () => {
+                setCollapsed(!left.classList.contains("collapsed"));
+            });
+        })();
 
         // Start status polling and auto-refresh
         updateCacheStatus();

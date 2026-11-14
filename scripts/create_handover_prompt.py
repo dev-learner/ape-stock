@@ -71,7 +71,19 @@ def file_blocks():
 
 prompt = f"""You are continuing development of a local Flask application called ape-stock.
 
-Current goals, tech stack, design decisions and todo items live on the Dashboard page of the running app.
+To gain a complete understanding of ape-stock, it's goals and it's components (tools 1-8) study tool1: 'Dashboard' page and it's contents.
+
+Keep the UK-only focus: FTSE 100 & FTSE 250.
+
+Use small modular changes (shared-core philosophy).
+
+Remove redundant code.
+
+IMPORTANT - If you edit a file: 
+1: Always make sure code is fully documented.
+2: If there is a 'minor' change in part of a function, or block of code, return the complete function (or block of code).
+3: If the edit is more than 'minor' return the complete file.
+4: NEVER return snippets of code.
 
 ===== DIRECTORY STRUCTURE =====
 {build_tree()}
@@ -79,7 +91,13 @@ Current goals, tech stack, design decisions and todo items live on the Dashboard
 ===== FILE CONTENTS =====
 {file_blocks()}
 
-Continue from this exact state. Prefer small, modular, well-commented changes. Keep the UK-only focus and the shared-core philosophy.
+
+Continue from this exact state. 
+
+Before anything else:
+1 - Confirm your understanding of ape-stock.
+2 - Any initial questions - Please ask.
+
 """
 
 OUT.write_text(prompt, encoding="utf-8")

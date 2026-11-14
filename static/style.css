@@ -25,6 +25,7 @@ body {
     overflow: hidden;
 }
 
+/* Left toolbar — collapsible */
 .left-column {
     width: 220px;
     min-width: 180px;
@@ -35,6 +36,8 @@ body {
     gap: 8px;
     border-right: 1px solid var(--light-blue);
     overflow-y: auto;
+    transition: width 0.25s ease, min-width 0.25s ease, padding 0.25s ease;
+    position: relative;
 }
 
 .left-column h2 { margin-bottom: 8px; font-size: 1.1rem; }
@@ -51,6 +54,59 @@ body {
 }
 
 .left-column button:hover { background: var(--accent); }
+
+/* Toolbar header + collapse toggle */
+.toolbar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.toolbar-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.toolbar-toggle {
+    background: transparent !important;
+    color: var(--accent) !important;
+    border: 1px solid var(--light-blue) !important;
+    padding: 2px 8px !important;
+    font-size: 1.1rem !important;
+    line-height: 1;
+    border-radius: 4px;
+    cursor: pointer;
+    min-width: auto !important;
+    text-align: center !important;
+}
+
+.toolbar-toggle:hover {
+    background: var(--light-blue) !important;
+    color: white !important;
+}
+
+/* Collapsed state — thin strip, only chevron visible */
+.left-column.collapsed {
+    width: 42px;
+    min-width: 42px;
+    padding: 12px 4px;
+    overflow: hidden;
+}
+
+.left-column.collapsed .toolbar-header h2,
+.left-column.collapsed button:not(.toolbar-toggle) {
+    display: none;
+}
+
+.left-column.collapsed .toolbar-header {
+    justify-content: center;
+    margin-bottom: 0;
+}
+
+.left-column.collapsed .toolbar-toggle {
+    margin: 0 auto;
+}
 
 .right-column {
     flex: 1;
@@ -80,6 +136,7 @@ body {
     color: var(--accent);
     text-decoration: none;
 }
+
 .data-table a:hover {
     text-decoration: underline;
     color: white;
@@ -111,6 +168,7 @@ body {
     font-variant-numeric: tabular-nums;
     width: 40px;
 }
+
 .data-table th:nth-child(1),
 .data-table th:nth-child(5) {
     text-align: center;
@@ -326,3 +384,66 @@ canvas.spark {
 .section { margin-bottom: 10px; font-size: 0.9rem; line-height: 1.45; }
 .section ul { margin: 4px 0 0 18px; padding: 0; }
 .section li { margin-bottom: 3px; }
+
+/* Tool 2 script button grid */
+.script-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.script-btn {
+    background: var(--light-blue);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 14px 12px;
+    cursor: pointer;
+    text-align: left;
+    font-size: 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 72px;
+    transition: background 0.15s ease;
+}
+
+.script-btn:hover {
+    background: var(--accent);
+}
+
+.script-btn .script-name {
+    font-weight: 600;
+    word-break: break-all;
+}
+
+.script-btn .run-badge {
+    align-self: flex-start;
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: bold;
+}
+
+.script-btn .run-badge.tool2 {
+    background: #4ade80;
+    color: #0d1b2a;
+}
+
+.script-btn .run-badge.venv {
+    background: #f87171;
+    color: white;
+}
+
+/* Cancel button */
+.script-btn.cancel-btn {
+    background: #5c2a2a;
+    justify-content: center;
+    text-align: center;
+    font-weight: 600;
+}
+
+.script-btn.cancel-btn:hover {
+    background: #7a3a3a;
+}
