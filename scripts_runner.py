@@ -1,8 +1,10 @@
 # scripts_runner.py
 import subprocess
 import sys
+import json
 from pathlib import Path
 from flask import Blueprint, request, jsonify
+from db import get_setting, set_setting
 
 SCRIPTS_DIR = Path(__file__).parent / "scripts"
 bp = Blueprint("scripts", __name__)
@@ -28,7 +30,7 @@ def scripts_run():
             [sys.executable, str(script_path)],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=300,          # raised for longer scripts
             cwd=str(SCRIPTS_DIR),
             encoding="utf-8",
             errors="replace"
@@ -70,3 +72,43 @@ def scripts_meta():
         pass
 
     return jsonify({"name": name, "desc": desc, "run": run})
+
+# --- Pause control ---
+@bp.route("/scripts/pause", methods=["POST"])
+def scripts_pause():
+    """Set or clear the background pause flag."""
+    data = request.get_json(silent=True) or {}
+    paused = bool(data.get("paused"))
+    set_setting("background_paused", "1" if paused else "0")
+    return jsonify({"ok": True, "paused": paused})
+
+# --- Script run counts ---
+def _load_counts():
+    raw = get_setting("script_run_counts", "{}")
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+def _save_counts(counts):
+    set_setting("script_run_counts", json.dumps(counts))
+
+@bp.route("/scripts/counts")
+def scripts_counts():
+    return jsonify(_load_counts())
+
+@bp.route("/scripts/increment", methods=["POST"])
+def scripts_increment():
+    data = request.get_json(silent=True) or {}
+    name = data.get("script", "").strip()
+    if not name:
+        return jsonify({"error": "script required"}), 400
+    counts = _load_counts()
+    counts[name] = counts.get(name, 0) + 1
+    _save_counts(counts)
+    return jsonify({"ok": True, "count": counts[name]})
+
+@bp.route("/scripts/clear_counts", methods=["POST"])
+def scripts_clear_counts():
+    set_setting("script_run_counts", "{}")
+    return jsonify({"ok": True})

@@ -131,10 +131,17 @@ def catchup_daily_closes():
     print(f"Catch-up: done. Wrote {filled} daily bars.")
 
 def background_updater():
+    """Main background loop. Respects background_paused setting while Tool 2 is active."""
     last_collapse = datetime.now(UK).date()
     last_holdings_daily = None
     while True:
         try:
+            # Pause while Tool 2 is running a script
+            if get_setting("background_paused") == "1":
+                print("Background paused (Tool 2 active)")
+                time.sleep(5)
+                continue
+
             conn = get_db()
             cur = conn.cursor()
             cur.execute("SELECT DISTINCT symbol FROM index_constituents")

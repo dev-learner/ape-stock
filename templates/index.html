@@ -49,10 +49,18 @@
 
     <script>
         document.querySelectorAll("[data-tool]").forEach(el => {
-            el.addEventListener("click", e => {
+            el.addEventListener("click", async e => {
                 e.preventDefault();
                 const id = el.dataset.tool;
+                const previous = window.AppState.currentTool;
+
+                // If we are leaving Tool 2, resume everything
+                if (previous === "2" && window.Tool2 && typeof window.Tool2.hide === "function") {
+                    await window.Tool2.hide();
+                }
+
                 window.AppState.currentTool = id;
+
                 if (id === "2" && window.Tool2) window.Tool2.show();
                 else if (id === "3" && window.Tool3) window.Tool3.show();
                 else if (id === "4" && window.Tool4) window.Tool4.show();
