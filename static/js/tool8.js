@@ -251,9 +251,9 @@ window.Tool8 = {
             const shortName = (r.name || "").length > 15 ? (r.name || "").slice(0, 15) + "…" : (r.name || "");
             const fullName = (r.name || "").replace(/"/g, "&quot;");
 
-            // --- gold star ---
-            const star = window.AppState.screenerSymbols?.has(r.symbol) ? "⭐ " : "";
-            // --- end gold star ---
+            // --- indicator: yellow circle if also in Tool 4 Screener ---
+            const indicator = window.AppState.screenerSymbols?.has(r.symbol) ? "🟡 " : "";
+            // --- end indicator ---
 
             let points = 0;
             const possible = 4;
@@ -301,7 +301,7 @@ window.Tool8 = {
             const highlight = hitPct >= hitThreshold ? 'style="background:rgba(74,222,128,0.12)"' : "";
 
             html += `<tr class="main-row" data-symbol="${r.symbol}" ${highlight}>
-                <td>${star}${buildSymbolLink(r.symbol, indexKey)}</td>
+                <td>${indicator}${buildSymbolLink(r.symbol, indexKey)}</td>
                 <td title="${fullName}">${shortName}</td>
                 <td>${formatNumber(r.price, "price")}</td>
                 <td class="${cls}">${formatNumber(r.change, "price")}</td>

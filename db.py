@@ -130,8 +130,20 @@ def init_db():
             value TEXT
         )
     """)
+
     cur.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('tracker_close_target', '3')")
-    
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS daily_ranks (
+        symbol TEXT,
+        date TEXT,
+        rank INTEGER,
+        score REAL,
+        persistence_days INTEGER,
+        PRIMARY KEY (symbol, date)
+    )
+""")
+
     conn.commit()
     conn.close()
 

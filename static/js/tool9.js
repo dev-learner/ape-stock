@@ -34,6 +34,17 @@ window.Tool9 = {
                 <label for="trackerCloseTarget">Tracker Close Target (%)</label>
                 <input type="number" id="trackerCloseTarget" min="1" max="10" step="0.5" value="3">
 
+                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">Ranking</h2>
+
+                <label for="rankWindow">Persistence window (days)</label>
+                <input type="number" id="rankWindow" min="5" max="120" step="1" value="35">
+
+                <label for="rankPresence">Minimum presence (%)</label>
+                <input type="number" id="rankPresence" min="10" max="100" step="1" value="50">
+
+                <label for="rankCutoff">Rank cut-off</label>
+                <input type="number" id="rankCutoff" min="5" max="50" step="1" value="12">
+
                 <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">RSI Settings</h2>
 
                 <label for="rsiOversold">Oversold Below</label>
@@ -77,6 +88,9 @@ window.Tool9 = {
             set("rsiOversold", "rsiOversold");
             set("rsiOverbought", "rsiOverbought");
             set("rsiLength", "rsiLength");
+            set("rankWindow", "rank_window");
+            set("rankPresence", "rank_presence");
+            set("rankCutoff", "rank_cutoff");
 
             // Keep localStorage in sync for Tool 8 etc.
             if (s.listLimit) localStorage.setItem("listLimit", s.listLimit);
@@ -88,6 +102,9 @@ window.Tool9 = {
             if (s.rsiOversold) localStorage.setItem("rsiOversold", s.rsiOversold);
             if (s.rsiOverbought) localStorage.setItem("rsiOverbought", s.rsiOverbought);
             if (s.rsiLength) localStorage.setItem("rsiLength", s.rsiLength);
+            if (s.rank_window) localStorage.setItem("rank_window", s.rank_window);
+            if (s.rank_presence) localStorage.setItem("rank_presence", s.rank_presence);
+            if (s.rank_cutoff) localStorage.setItem("rank_cutoff", s.rank_cutoff);
         } catch (e) {
             console.warn("Could not load settings", e);
         }
@@ -104,7 +121,10 @@ window.Tool9 = {
             tracker_close_target: document.getElementById("trackerCloseTarget").value,
             rsiOversold: document.getElementById("rsiOversold").value,
             rsiOverbought: document.getElementById("rsiOverbought").value,
-            rsiLength: document.getElementById("rsiLength").value
+            rsiLength: document.getElementById("rsiLength").value,
+            rank_window: document.getElementById("rankWindow").value,
+            rank_presence: document.getElementById("rankPresence").value,
+            rank_cutoff: document.getElementById("rankCutoff").value            
         };
 
         try {
@@ -124,8 +144,11 @@ window.Tool9 = {
                 localStorage.setItem("stampPct", payload.stampPct);
                 localStorage.setItem("rsiOversold", payload.rsiOversold);
                 localStorage.setItem("rsiOverbought", payload.rsiOverbought);
-                localStorage.setItem("rsiLength", payload.rsiLength);                
-
+                localStorage.setItem("rsiLength", payload.rsiLength);
+                localStorage.setItem("rank_window", payload.rank_window);
+                localStorage.setItem("rank_presence", payload.rank_presence);
+                localStorage.setItem("rank_cutoff", payload.rank_cutoff);
+                
                 msg.textContent = "Settings saved";
                 msg.style.color = "#4ade80";
             } else {

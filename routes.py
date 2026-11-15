@@ -63,7 +63,7 @@ def settings():
 def settings_save():
     data = request.get_json(silent=True) or {}
 
-    # Tracker close target (keep existing validation)
+    # Tracker close target
     target = data.get("tracker_close_target")
     if target is not None:
         try:
@@ -73,16 +73,15 @@ def settings_save():
         except (ValueError, TypeError):
             pass
 
-    # RSI settings with validation
-    for key, min_v, max_v, default in (
-        ("rsiOversold", 1, 50, 30),
-        ("rsiOverbought", 50, 100, 70),
-        ("rsiLength", 1, 30, 7),
+    # Ranking settings
+    for key, default in (
+        ("rank_window", 35),
+        ("rank_presence", 50),
+        ("rank_cutoff", 12),
     ):
         if key in data and data[key] is not None:
             try:
                 val = int(float(data[key]))
-                val = max(min_v, min(max_v, val))
                 set_setting(key, val)
             except (ValueError, TypeError):
                 set_setting(key, default)
@@ -105,9 +104,9 @@ def settings_get():
         "hitThreshold": get_setting("hitThreshold", "50"),
         "notional": get_setting("notional", "500"),
         "stampPct": get_setting("stampPct", "0.5"),
-        "rsiOversold": get_setting("rsiOversold", "30"),
-        "rsiOverbought": get_setting("rsiOverbought", "70"),
-        "rsiLength": get_setting("rsiLength", "7"),
+        "rank_window": get_setting("rank_window", "35"),
+        "rank_presence": get_setting("rank_presence", "50"),
+        "rank_cutoff": get_setting("rank_cutoff", "12"),
     })
 
 @bp.route("/status")
@@ -366,28 +365,57 @@ def schema():
 
 @bp.route("/screener")
 def screener():
-    """Return names that currently pass hard-coded safe-bet filters."""
+    """Return names that currently pass hard-coded safe-bet filters, with today's rank."""
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("""
-        SELECT symbol, name, sector, price, change_pct,
-               ret_3m, ret_6m, dist_52w_high,
-               above_50ma, pct_from_50ma,
-               above_200ma, pct_from_200ma,
-               vol_20d, sector_rel_1d, sector_rel_5d,
-               market_cap, avg_volume
-        FROM index_quotes
-        WHERE above_50ma = 1
-          AND above_200ma = 1
-          AND (ret_3m IS NULL OR ret_3m > -15)
-          AND (market_cap IS NULL OR market_cap > 2000000000)
-          AND price IS NOT NULL
-        ORDER BY ret_3m DESC
-        LIMIT 100
-    """)
+
+    # Latest rank date
+    cur.execute("SELECT MAX(date) FROM daily_ranks")
+    row = cur.fetchone()
+    rank_date = row[0] if row and row[0] else None
+
+    if rank_date:
+        cur.execute("""
+            SELECT q.symbol, q.name, q.sector, q.price, q.change_pct,
+                   q.ret_3m, q.ret_6m, q.dist_52w_high,
+                   q.above_50ma, q.pct_from_50ma,
+                   q.above_200ma, q.pct_from_200ma,
+                   q.vol_20d, q.sector_rel_1d, q.sector_rel_5d,
+                   q.market_cap, q.avg_volume,
+                   r.rank
+            FROM index_quotes q
+            LEFT JOIN daily_ranks r
+                   ON r.symbol = q.symbol AND r.date = ?
+            WHERE q.above_50ma = 1
+              AND q.above_200ma = 1
+              AND (q.ret_3m IS NULL OR q.ret_3m > -15)
+              AND (q.market_cap IS NULL OR q.market_cap > 2000000000)
+              AND q.price IS NOT NULL
+            ORDER BY r.rank ASC NULLS LAST, q.ret_3m DESC
+            LIMIT 100
+        """, (rank_date,))
+    else:
+        cur.execute("""
+            SELECT symbol, name, sector, price, change_pct,
+                   ret_3m, ret_6m, dist_52w_high,
+                   above_50ma, pct_from_50ma,
+                   above_200ma, pct_from_200ma,
+                   vol_20d, sector_rel_1d, sector_rel_5d,
+                   market_cap, avg_volume,
+                   NULL AS rank
+            FROM index_quotes
+            WHERE above_50ma = 1
+              AND above_200ma = 1
+              AND (ret_3m IS NULL OR ret_3m > -15)
+              AND (market_cap IS NULL OR market_cap > 2000000000)
+              AND price IS NOT NULL
+            ORDER BY ret_3m DESC
+            LIMIT 100
+        """)
+
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
-    return jsonify({"rows": rows})
+    return jsonify({"rows": rows, "rank_date": rank_date})
 
 @bp.route("/dashboard")
 def dashboard():
