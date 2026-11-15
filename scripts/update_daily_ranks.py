@@ -1,11 +1,10 @@
 # scripts/update_daily_ranks.py
-# DESC: Compute and store daily ranks from Screener persistence
+# DESC: Compute and store daily ranks from Screener persistence (full universe)
 # RUN: Tool2
 
 import sqlite3
 from pathlib import Path
 from collections import defaultdict
-from datetime import datetime
 
 db_path = Path(__file__).parent.parent / "ape_stock.db"
 
@@ -39,6 +38,9 @@ for r in cur.fetchall():
 cur.execute("SELECT symbol, market_cap FROM index_quotes")
 meta = {r["symbol"]: r["market_cap"] for r in cur.fetchall()}
 
+# full universe = every symbol that has daily closes
+universe = set(by_sym.keys())
+
 sorted_dates = sorted(all_dates)
 if not sorted_dates:
     print("No daily closes.")
@@ -46,7 +48,7 @@ if not sorted_dates:
     raise SystemExit
 
 today = sorted_dates[-1]
-print(f"Ranking as of {today}")
+print(f"Ranking as of {today} ({len(universe)} symbols)")
 
 def build_screener(as_of):
     cands = []
@@ -79,7 +81,12 @@ for d in window_dates:
     for sym in top:
         scores[sym] += 1
 
-# rank by score descending
+# ensure every symbol in the universe has an entry (score 0 if never appeared)
+for sym in universe:
+    if sym not in scores:
+        scores[sym] = 0
+
+# rank by score descending, then symbol for stability
 ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
 needed = max(1, int(window * min_pct / 100.0))
 
@@ -96,5 +103,6 @@ print("Top 12:")
 for rank, (sym, sc) in enumerate(ranked[:12], 1):
     flag = " *" if sc >= needed else ""
     print(f"  {rank:2}. {sym:<8} {sc} days{flag}")
+print(f"... lowest rank: {ranked[-1][0]} (score {ranked[-1][1]})")
 conn.close()
 print("Done.")

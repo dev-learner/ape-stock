@@ -365,16 +365,33 @@ def schema():
 
 @bp.route("/screener")
 def screener():
-    """Return names that currently pass hard-coded safe-bet filters, with today's rank."""
+    """Return Screener names with today's rank.
+    ?mode=full  -> all ranked symbols (including those failing current filters)
+    default     -> only current safe-bet names
+    """
+    mode = request.args.get("mode", "optimal")
     conn = get_db()
     cur = conn.cursor()
 
-    # Latest rank date
     cur.execute("SELECT MAX(date) FROM daily_ranks")
     row = cur.fetchone()
     rank_date = row[0] if row and row[0] else None
 
-    if rank_date:
+    if mode == "full" and rank_date:
+        cur.execute("""
+            SELECT q.symbol, q.name, q.sector, q.price, q.change_pct,
+                   q.ret_3m, q.ret_6m, q.dist_52w_high,
+                   q.above_50ma, q.pct_from_50ma,
+                   q.above_200ma, q.pct_from_200ma,
+                   q.vol_20d, q.sector_rel_1d, q.sector_rel_5d,
+                   q.market_cap, q.avg_volume,
+                   r.rank
+            FROM daily_ranks r
+            LEFT JOIN index_quotes q ON q.symbol = r.symbol
+            WHERE r.date = ?
+            ORDER BY r.rank ASC
+        """, (rank_date,))
+    elif rank_date:
         cur.execute("""
             SELECT q.symbol, q.name, q.sector, q.price, q.change_pct,
                    q.ret_3m, q.ret_6m, q.dist_52w_high,
@@ -415,7 +432,7 @@ def screener():
 
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
-    return jsonify({"rows": rows, "rank_date": rank_date})
+    return jsonify({"rows": rows, "rank_date": rank_date, "mode": mode})
 
 @bp.route("/dashboard")
 def dashboard():

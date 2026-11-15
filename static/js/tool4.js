@@ -1,11 +1,13 @@
 // static/js/tool4.js
 window.Tool4 = {
+    fullRank: false,
+
     async show() {
-        const res = await fetch("/screener");
+        const url = this.fullRank ? "/screener?mode=full" : "/screener";
+        const res = await fetch(url);
         const data = await res.json();
         const rows = data.rows || [];
 
-        // Track Tool 8 risers and fallers separately
         let tool8Risers = new Set();
         let tool8Fallers = new Set();
         try {
@@ -34,10 +36,18 @@ window.Tool4 = {
 
     render(rows) {
         const container = document.getElementById("results");
+        const title = this.fullRank
+            ? `Screener — Full Rank (${rows.length})`
+            : `Screener (${rows.length} safe bets)`;
+        const toggleLabel = this.fullRank ? "Optimal Rank" : "Full Rank";
+
         container.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <h2>Screener (${rows.length} safe bets)</h2>
-                <button id="add-to-tracker" class="mini-btn" style="background:#1e5c3a;">Add selected to Tracker</button>
+                <h2>${title}</h2>
+                <div>
+                    <button id="rank-toggle" class="mini-btn" style="margin-right:8px; background:#1e3a5c;">${toggleLabel}</button>
+                    <button id="add-to-tracker" class="mini-btn" style="background:#1e5c3a;">Add selected to Tracker</button>
+                </div>
             </div>
             <table class="data-table" id="screener-table">
                 <thead>
@@ -88,6 +98,11 @@ window.Tool4 = {
             </table>
         `;
 
+        document.getElementById("rank-toggle")?.addEventListener("click", () => {
+            this.fullRank = !this.fullRank;
+            this.show();
+        });
+
         document.getElementById("add-to-tracker")?.addEventListener("click", async () => {
             const checked = [...document.querySelectorAll("#screener-table input[type=checkbox]:checked")];
             if (!checked.length) return;
@@ -123,7 +138,6 @@ window.Tool4 = {
             });
         }
 
-        // Apply default sort: 3m % descending
         this.applyDefaultSort(table);
     },
 
@@ -151,7 +165,8 @@ window.Tool4 = {
 
     async refreshPrices() {
         try {
-            const res = await fetch("/screener");
+            const url = this.fullRank ? "/screener?mode=full" : "/screener";
+            const res = await fetch(url);
             const data = await res.json();
             const rows = data.rows || [];
             rows.forEach(r => {

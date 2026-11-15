@@ -79,7 +79,6 @@ function makeTableSortable(table, options = {}) {
             const colIndex = th.cellIndex;
 
             rows.sort((a, b) => {
-                // Skip details rows (they have fewer cells)
                 if (a.classList.contains("details-row") || b.classList.contains("details-row")) return 0;
 
                 const cellA = a.children[colIndex];
@@ -90,6 +89,15 @@ function makeTableSortable(table, options = {}) {
                 let vb = getVal(cellB);
                 const na = parseFloat(String(va).replace(/[^0-9.-]/g, ""));
                 const nb = parseFloat(String(vb).replace(/[^0-9.-]/g, ""));
+
+                const aEmpty = isNaN(na) || va === "";
+                const bEmpty = isNaN(nb) || vb === "";
+
+                // Empty values always sort last, regardless of direction
+                if (aEmpty && bEmpty) return 0;
+                if (aEmpty) return 1;
+                if (bEmpty) return -1;
+
                 if (!isNaN(na) && !isNaN(nb)) return (na - nb) * sortDir;
                 return String(va).localeCompare(String(vb)) * sortDir;
             });
