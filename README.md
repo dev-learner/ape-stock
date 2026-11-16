@@ -22,3 +22,23 @@ Recent commits (13–16 Nov 2026) show the current focus:
 - Handover prompt updated to point at the GitHub repo.
 
 Core functionality is in place and operational. The Dashboard explicitly lists remaining To-Dos (visual badges on Tool 8 for current Screener names, live price/day-% on the Screener, acceleration cues, news/RNS flags, fully editable Rules feeding Screener & Hit, alerts, drag-and-drop, fundamentals rows, etc.). We are in an iterative enhancement / refinement phase: small modular improvements, wiring settings more thoroughly, and cleaning redundancy while preserving the FTSE-only shared-core approach.
+
+**BEWARE!**
+
+- On first load there is no data!
+- Do NOT use the tool2 scripts (Ad-Hoc Scripts) until you fully understand what they do.  
+- The scripts were all been written during development, some query the database, some amend the database, some back-test theories with the latter being a core driver to the development of ape-stock.  
+- Feel free to write your own scripts and simply place them in the [ape-stock/scripts/] directory, tool2 will automatically pick it up ready to run. If you do write your own scripts, ensure they start as follows:
+
+```
+# scripts/the-name-of-your-script.py
+# DESC: a brief description of what your script does
+# RUN: Tool2
+```
+More to come... much more! 😉
+
+Oh yes: **How to run ape-stock?**
+
+- Run: [ape-stock/run.bat] file. On first run it may take some time whilst it downloads data for all FTSE 100 & 250 stocks.
+
+Any Q's? Feel free to message me: [https://x.com/Paul__Erasmus]
