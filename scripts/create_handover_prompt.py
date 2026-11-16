@@ -96,7 +96,8 @@ Continue from this exact state.
 
 Before anything else:
 1 - Confirm your understanding of ape-stock.
-2 - Any initial questions - Please ask.
+2 - Where we are in the devlopment cycle (what are we currently working on?).
+3 - Any initial questions - Please ask.
 
 """
 
