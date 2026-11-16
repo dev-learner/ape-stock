@@ -57,15 +57,17 @@ See requirements.txt (Flask, yfinance, pandas, etc.)
 Internet connection (required for first run and ongoing updates)
 
 # Project Layout
-- app.py              **Flask entry + background thread**
-- background.py       **Quote updater, snapshots, holdings marks**
-- db.py               **SQLite helpers + schema**
-- routes.py           **Main routes (status, screener, tool endpoints)**
-- holdings.py         **Holdings tracker blueprint**
-- scripts_runner.py   **Tool 2 backend**
-- scripts/            **Ad-hoc analysis & update scripts**
-- static/             **CSS + JS (dashboard, tool3, tool4, tool8…)**
-- templates/          *index.html, settings.html**
+| File | Function |
+| -------------- |--------------------------------------------|
+| app.py | Flask entry + background thread |
+| background.py | Quote updater, snapshots, holdings marks |
+| db.py | SQLite helpers + schema |
+| routes.py | Main routes (status, screener, tool endpoints) |
+| holdings.py | Holdings tracker blueprint |
+| scripts_runner.py | Tool 2 backend |
+| scripts/ | Ad-hoc analysis & update scripts |
+| static/ | CSS + JS (dashboard, tool3, tool4, tool8…) |
+| templates/ | index.html, settings.html |
 
 # Contact
 Any questions? Feel free to message me: https://x.com/Paul__Erasmus
