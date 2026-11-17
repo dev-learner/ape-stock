@@ -5,6 +5,8 @@
 import sqlite3
 from pathlib import Path
 from collections import defaultdict
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 db_path = Path(__file__).parent.parent / "ape_stock.db"
 
@@ -104,5 +106,16 @@ for rank, (sym, sc) in enumerate(ranked[:12], 1):
     flag = " *" if sc >= needed else ""
     print(f"  {rank:2}. {sym:<8} {sc} days{flag}")
 print(f"... lowest rank: {ranked[-1][0]} (score {ranked[-1][1]})")
+
+# Record timestamp
+UK = ZoneInfo("Europe/London")
+now = datetime.now(UK).isoformat()
+cur.execute("""
+    INSERT INTO app_settings (key, value)
+    VALUES ('ranks_updated', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+""", (now,))
+conn.commit()
+
 conn.close()
 print("Done.")

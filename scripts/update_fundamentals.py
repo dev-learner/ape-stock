@@ -1,12 +1,15 @@
 # scripts/update_fundamentals.py
-# DESC: Fill sector, industry, market cap, PE, yields, dates and other fundamentals
-# RUN: VENV
+# DESC: Update dedicated fundamentals table (and key fields in index_quotes) from yfinance
+# RUN: Tool2
 
 """
-Fill sector, industry, market_cap, avg_volume, PE, dividend yield,
-shares outstanding, 52-week high/low, beta, book value, P/B,
-ex-dividend date and earnings date.
+Pulls fundamental data from yfinance and stores it in the dedicated
+fundamentals table. Also keeps market_cap, sector, industry and avg_volume
+in index_quotes so existing screener / rank code continues to work.
+
+On first run it migrates any existing fundamental columns from index_quotes.
 """
+
 import sqlite3
 import time
 from pathlib import Path
@@ -16,35 +19,41 @@ import warnings
 warnings.filterwarnings("ignore")
 
 db_path = Path(__file__).parent.parent / "ape_stock.db"
-conn = sqlite3.connect(db_path, timeout=30)
+conn = sqlite3.connect(db_path, timeout=60)
+conn.row_factory = sqlite3.Row
 cur = conn.cursor()
 
-columns = [
-    ("sector", "TEXT"),
-    ("industry", "TEXT"),
-    ("market_cap", "INTEGER"),
-    ("avg_volume", "INTEGER"),
-    ("pe_trailing", "REAL"),
-    ("pe_forward", "REAL"),
-    ("dividend_yield", "REAL"),
-    ("shares_outstanding", "INTEGER"),
-    ("fifty_two_week_high", "REAL"),
-    ("fifty_two_week_low", "REAL"),
-    ("beta", "REAL"),
-    ("book_value", "REAL"),
-    ("price_to_book", "REAL"),
-    ("ex_dividend_date", "TEXT"),
-    ("earnings_date", "TEXT"),
+# ---------------------------------------------------------------------------
+# One-time migration of existing data from index_quotes (if columns exist)
+# ---------------------------------------------------------------------------
+def column_exists(table, column):
+    cur.execute(f"PRAGMA table_info({table})")
+    return any(r[1] == column for r in cur.fetchall())
+
+migrate_cols = [
+    "sector", "industry", "market_cap", "avg_volume",
+    "pe_trailing", "pe_forward", "dividend_yield",
+    "shares_outstanding", "fifty_two_week_high", "fifty_two_week_low",
+    "beta", "book_value", "price_to_book",
+    "ex_dividend_date", "earnings_date"
 ]
+existing = [c for c in migrate_cols if column_exists("index_quotes", c)]
 
-for col, typ in columns:
-    try:
-        cur.execute(f"ALTER TABLE index_quotes ADD COLUMN {col} {typ}")
-        print(f"Added column: {col}")
-    except sqlite3.OperationalError:
-        pass
-conn.commit()
+if existing:
+    print("Migrating existing fundamental data from index_quotes…")
+    cols_sql = ", ".join(existing)
+    cur.execute(f"""
+        INSERT OR IGNORE INTO fundamentals (symbol, {cols_sql})
+        SELECT symbol, {cols_sql}
+        FROM index_quotes
+        WHERE symbol IS NOT NULL
+    """)
+    conn.commit()
+    print(f"Migrated {cur.rowcount} rows")
 
+# ---------------------------------------------------------------------------
+# Update from yfinance
+# ---------------------------------------------------------------------------
 def ts_to_date(ts):
     if not ts:
         return None
@@ -53,11 +62,13 @@ def ts_to_date(ts):
     except Exception:
         return None
 
-cur.execute("SELECT symbol FROM index_quotes")
-symbols = [r[0] for r in cur.fetchall()]
+cur.execute("SELECT symbol FROM index_constituents")
+symbols = [r["symbol"] for r in cur.fetchall()]
 print(f"Updating fundamentals for {len(symbols)} symbols…")
 
+now = datetime.now(timezone.utc).isoformat()
 updated = 0
+
 for i, sym in enumerate(symbols, 1):
     try:
         info = yf.Ticker(sym).info or {}
@@ -76,28 +87,55 @@ for i, sym in enumerate(symbols, 1):
             "beta": info.get("beta"),
             "book_value": info.get("bookValue"),
             "price_to_book": info.get("priceToBook"),
+            "roe": info.get("returnOnEquity"),
+            "profit_margin": info.get("profitMargins"),
+            "operating_margin": info.get("operatingMargins"),
+            "revenue_growth": info.get("revenueGrowth"),
+            "free_cashflow": info.get("freeCashflow"),
+            "current_ratio": info.get("currentRatio"),
             "ex_dividend_date": ts_to_date(info.get("exDividendDate")),
             "earnings_date": ts_to_date(info.get("earningsTimestamp") or info.get("earningsTimestampStart")),
+            "updated": now,
         }
 
-        set_clause = ", ".join(f"{k} = COALESCE(?, {k})" for k in data)
-        values = list(data.values()) + [sym]
-
+        # Upsert into fundamentals
+        cols = list(data.keys())
+        placeholders = ", ".join("?" * len(cols))
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols)
         cur.execute(f"""
+            INSERT INTO fundamentals (symbol, {", ".join(cols)})
+            VALUES (?, {placeholders})
+            ON CONFLICT(symbol) DO UPDATE SET {updates}
+        """, [sym] + list(data.values()))
+
+        # Keep critical fields in index_quotes for existing code
+        cur.execute("""
             UPDATE index_quotes
-            SET {set_clause}
+            SET sector = COALESCE(?, sector),
+                industry = COALESCE(?, industry),
+                market_cap = COALESCE(?, market_cap),
+                avg_volume = COALESCE(?, avg_volume)
             WHERE symbol = ?
-        """, values)
+        """, (
+            data["sector"], data["industry"],
+            data["market_cap"], data["avg_volume"],
+            sym
+        ))
 
-        if cur.rowcount:
-            updated += 1
-
+        updated += 1
         if i % 25 == 0:
             print(f"  …{i}/{len(symbols)}", flush=True)
             conn.commit()
-        time.sleep(0.25)
+        time.sleep(0.3)
     except Exception as e:
         print(f"  {sym}: {e}")
+
+# Record timestamp
+cur.execute("""
+    INSERT INTO app_settings (key, value)
+    VALUES ('fundamentals_updated', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+""", (now,))
 
 conn.commit()
 conn.close()

@@ -24,6 +24,12 @@ window.Tool2 = {
         if (typeof startAutoRefresh === "function") startAutoRefresh();
     },
 
+    async refresh() {
+        const res = await fetch("/scripts/list");
+        const files = await res.json();
+        await this.render(files);
+    },
+
     async render(files) {
         const container = document.getElementById("results");
 
@@ -53,13 +59,23 @@ window.Tool2 = {
             buttonsHtml += `
                 <button class="script-btn" 
                         data-script="${m.name}" 
-                        title="${title}">
+                        title="${title}"
+                        style="position:relative;">
                     <span class="script-name">${m.name}</span>
                     <span class="run-badge tool2">Used: ${used}</span>
+                    <input type="checkbox" class="script-select" data-script="${m.name}"
+                           style="position:absolute; bottom:4px; right:4px; width:15px; height:15px; cursor:pointer; z-index:2;"
+                           title="Select for deletion">
                 </button>`;
         });
 
         buttonsHtml += `
+            <button class="script-btn" id="tool2-refresh" title="Re-scan scripts directory" style="background:#1e5c3a;">
+                Refresh
+            </button>
+            <button class="script-btn" id="tool2-delete" title="Delete selected scripts" style="background:#5c2a2a;">
+                Delete
+            </button>
             <button class="script-btn cancel-btn" id="tool2-cancel" title="Return to Dashboard">
                 Cancel
             </button>`;
@@ -74,7 +90,43 @@ window.Tool2 = {
             <div class="script-grid">
                 ${buttonsHtml}
             </div>
-            <pre id="script-output" class="script-output" style="margin-top:20px;"></pre>`;
+            <div style="position:relative; margin-top:20px;">
+                <button id="tool2-copy" title="Copy all output to clipboard"
+                        style="position:absolute; top:8px; right:8px; padding:4px 10px; font-size:0.85rem; background:#1e3a5c; color:#fff; border:none; border-radius:4px; cursor:pointer;">
+                    Copy
+                </button>
+                <pre id="script-output" class="script-output" style="margin-top:0; padding-top:36px;"></pre>
+            </div>`;
+
+        // Refresh
+        document.getElementById("tool2-refresh").addEventListener("click", () => this.refresh());
+
+        // Delete selected
+        document.getElementById("tool2-delete").addEventListener("click", async () => {
+            const selected = Array.from(document.querySelectorAll(".script-select:checked"))
+                .map(cb => cb.dataset.script);
+            if (selected.length === 0) {
+                alert("No scripts selected");
+                return;
+            }
+            if (!confirm(`Delete ${selected.length} script(s)?\n\n${selected.join("\n")}`)) {
+                return;
+            }
+            try {
+                const res = await fetch("/scripts/delete", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({scripts: selected})
+                });
+                const data = await res.json();
+                if (data.errors && data.errors.length) {
+                    alert("Some errors:\n" + data.errors.join("\n"));
+                }
+                await this.refresh();
+            } catch (e) {
+                alert("Delete failed: " + e);
+            }
+        });
 
         // Cancel → leave Tool 2
         document.getElementById("tool2-cancel").addEventListener("click", async () => {
@@ -84,9 +136,27 @@ window.Tool2 = {
             else if (window.Dashboard) window.Dashboard.show();
         });
 
+        // Copy output
+        document.getElementById("tool2-copy").addEventListener("click", async () => {
+            const output = document.getElementById("script-output");
+            const text = output.textContent || "";
+            try {
+                await navigator.clipboard.writeText(text);
+                const btn = document.getElementById("tool2-copy");
+                const orig = btn.textContent;
+                btn.textContent = "Copied";
+                setTimeout(() => { btn.textContent = orig; }, 1500);
+            } catch (e) {
+                alert("Copy failed");
+            }
+        });
+
         // Script buttons → increment count + run
         document.querySelectorAll(".script-btn[data-script]").forEach(btn => {
-            btn.addEventListener("click", async () => {
+            btn.addEventListener("click", async (e) => {
+                // Ignore clicks that land on the checkbox
+                if (e.target.classList.contains("script-select")) return;
+
                 const name = btn.dataset.script;
                 const output = document.getElementById("script-output");
                 output.textContent = "Running…";

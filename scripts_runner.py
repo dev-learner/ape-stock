@@ -112,3 +112,30 @@ def scripts_increment():
 def scripts_clear_counts():
     set_setting("script_run_counts", "{}")
     return jsonify({"ok": True})
+
+@bp.route("/scripts/delete", methods=["POST"])
+def scripts_delete():
+    """Delete one or more scripts from the scripts directory."""
+    data = request.get_json(silent=True) or {}
+    names = data.get("scripts", [])
+    if not isinstance(names, list):
+        return jsonify({"error": "scripts must be a list"}), 400
+
+    deleted = []
+    errors = []
+    for name in names:
+        name = str(name).strip()
+        if not name or not name.endswith(".py") or "/" in name or "\\" in name or name.startswith("."):
+            errors.append(f"Invalid name: {name}")
+            continue
+        path = SCRIPTS_DIR / name
+        if not path.exists():
+            errors.append(f"Not found: {name}")
+            continue
+        try:
+            path.unlink()
+            deleted.append(name)
+        except Exception as e:
+            errors.append(f"{name}: {e}")
+
+    return jsonify({"ok": True, "deleted": deleted, "errors": errors})

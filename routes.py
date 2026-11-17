@@ -86,6 +86,22 @@ def settings_save():
             except (ValueError, TypeError):
                 set_setting(key, default)
 
+    # Valuation filter settings
+    for key, default in (
+        ("pe_min", 5.0),
+        ("pe_max", 40.0),
+        ("pb_max", 4.0),
+    ):
+        if key in data and data[key] is not None:
+            try:
+                val = float(data[key])
+                set_setting(key, val)
+            except (ValueError, TypeError):
+                set_setting(key, default)
+
+    if "require_dividend" in data and data["require_dividend"] is not None:
+        set_setting("require_dividend", "1" if str(data["require_dividend"]) in ("1", "true", "True") else "0")
+
     # All other settings stored as strings
     for key in ("listLimit", "riserPct", "fallerPct", "hitThreshold", "notional", "stampPct"):
         if key in data and data[key] is not None:
@@ -107,6 +123,10 @@ def settings_get():
         "rank_window": get_setting("rank_window", "35"),
         "rank_presence": get_setting("rank_presence", "50"),
         "rank_cutoff": get_setting("rank_cutoff", "12"),
+        "pe_min": get_setting("pe_min", "5"),
+        "pe_max": get_setting("pe_max", "40"),
+        "pb_max": get_setting("pb_max", "4"),
+        "require_dividend": get_setting("require_dividend", "1"),
     })
 
 @bp.route("/status")
@@ -373,9 +393,32 @@ def screener():
     conn = get_db()
     cur = conn.cursor()
 
+    # Valuation filter settings
+    try:
+        pe_min = float(get_setting("pe_min", "5"))
+    except (TypeError, ValueError):
+        pe_min = 5.0
+    try:
+        pe_max = float(get_setting("pe_max", "40"))
+    except (TypeError, ValueError):
+        pe_max = 40.0
+    try:
+        pb_max = float(get_setting("pb_max", "4"))
+    except (TypeError, ValueError):
+        pb_max = 4.0
+    require_div = get_setting("require_dividend", "1") == "1"
+
     cur.execute("SELECT MAX(date) FROM daily_ranks")
     row = cur.fetchone()
     rank_date = row[0] if row and row[0] else None
+
+    valuation_sql = """
+        AND (f.pe_trailing IS NULL OR f.pe_trailing BETWEEN ? AND ?)
+        AND (f.price_to_book IS NULL OR f.price_to_book < ?)
+    """
+    valuation_params = [pe_min, pe_max, pb_max]
+    if require_div:
+        valuation_sql += " AND (f.dividend_yield IS NULL OR f.dividend_yield > 0)"
 
     if mode == "full" and rank_date:
         cur.execute("""
@@ -392,7 +435,7 @@ def screener():
             ORDER BY r.rank ASC
         """, (rank_date,))
     elif rank_date:
-        cur.execute("""
+        sql = f"""
             SELECT q.symbol, q.name, q.sector, q.price, q.change_pct,
                    q.ret_3m, q.ret_6m, q.dist_52w_high,
                    q.above_50ma, q.pct_from_50ma,
@@ -403,32 +446,38 @@ def screener():
             FROM index_quotes q
             LEFT JOIN daily_ranks r
                    ON r.symbol = q.symbol AND r.date = ?
+            LEFT JOIN fundamentals f ON f.symbol = q.symbol
             WHERE q.above_50ma = 1
               AND q.above_200ma = 1
               AND (q.ret_3m IS NULL OR q.ret_3m > -15)
               AND (q.market_cap IS NULL OR q.market_cap > 2000000000)
               AND q.price IS NOT NULL
+              {valuation_sql}
             ORDER BY r.rank ASC NULLS LAST, q.ret_3m DESC
             LIMIT 100
-        """, (rank_date,))
+        """
+        cur.execute(sql, [rank_date] + valuation_params)
     else:
-        cur.execute("""
-            SELECT symbol, name, sector, price, change_pct,
-                   ret_3m, ret_6m, dist_52w_high,
-                   above_50ma, pct_from_50ma,
-                   above_200ma, pct_from_200ma,
-                   vol_20d, sector_rel_1d, sector_rel_5d,
-                   market_cap, avg_volume,
+        sql = f"""
+            SELECT q.symbol, q.name, q.sector, q.price, q.change_pct,
+                   q.ret_3m, q.ret_6m, q.dist_52w_high,
+                   q.above_50ma, q.pct_from_50ma,
+                   q.above_200ma, q.pct_from_200ma,
+                   q.vol_20d, q.sector_rel_1d, q.sector_rel_5d,
+                   q.market_cap, q.avg_volume,
                    NULL AS rank
-            FROM index_quotes
-            WHERE above_50ma = 1
-              AND above_200ma = 1
-              AND (ret_3m IS NULL OR ret_3m > -15)
-              AND (market_cap IS NULL OR market_cap > 2000000000)
-              AND price IS NOT NULL
-            ORDER BY ret_3m DESC
+            FROM index_quotes q
+            LEFT JOIN fundamentals f ON f.symbol = q.symbol
+            WHERE q.above_50ma = 1
+              AND q.above_200ma = 1
+              AND (q.ret_3m IS NULL OR q.ret_3m > -15)
+              AND (q.market_cap IS NULL OR q.market_cap > 2000000000)
+              AND q.price IS NOT NULL
+              {valuation_sql}
+            ORDER BY q.ret_3m DESC
             LIMIT 100
-        """)
+        """
+        cur.execute(sql, valuation_params)
 
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()

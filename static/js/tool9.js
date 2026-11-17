@@ -45,6 +45,23 @@ window.Tool9 = {
                 <label for="rankCutoff">Rank cut-off</label>
                 <input type="number" id="rankCutoff" min="5" max="50" step="1" value="12">
 
+                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">Valuation Filters (Tool 4)</h2>
+
+                <label for="peMin">Trailing PE min</label>
+                <input type="number" id="peMin" min="0" max="100" step="0.5" value="5">
+
+                <label for="peMax">Trailing PE max</label>
+                <input type="number" id="peMax" min="0" max="200" step="0.5" value="40">
+
+                <label for="pbMax">Price / Book max</label>
+                <input type="number" id="pbMax" min="0" max="20" step="0.1" value="4">
+
+                <label for="requireDividend">Require positive dividend yield</label>
+                <select id="requireDividend">
+                    <option value="1">Yes</option>
+                    <option value="0">No</option>
+                </select>
+
                 <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">RSI Settings</h2>
 
                 <label for="rsiOversold">Oversold Below</label>
@@ -91,8 +108,12 @@ window.Tool9 = {
             set("rankWindow", "rank_window");
             set("rankPresence", "rank_presence");
             set("rankCutoff", "rank_cutoff");
+            set("peMin", "pe_min");
+            set("peMax", "pe_max");
+            set("pbMax", "pb_max");
+            set("requireDividend", "require_dividend");
 
-            // Keep localStorage in sync for Tool 8 etc.
+            // Keep localStorage in sync
             if (s.listLimit) localStorage.setItem("listLimit", s.listLimit);
             if (s.riserPct) localStorage.setItem("riserPct", s.riserPct);
             if (s.fallerPct) localStorage.setItem("fallerPct", s.fallerPct);
@@ -105,6 +126,10 @@ window.Tool9 = {
             if (s.rank_window) localStorage.setItem("rank_window", s.rank_window);
             if (s.rank_presence) localStorage.setItem("rank_presence", s.rank_presence);
             if (s.rank_cutoff) localStorage.setItem("rank_cutoff", s.rank_cutoff);
+            if (s.pe_min) localStorage.setItem("pe_min", s.pe_min);
+            if (s.pe_max) localStorage.setItem("pe_max", s.pe_max);
+            if (s.pb_max) localStorage.setItem("pb_max", s.pb_max);
+            if (s.require_dividend) localStorage.setItem("require_dividend", s.require_dividend);
         } catch (e) {
             console.warn("Could not load settings", e);
         }
@@ -124,7 +149,11 @@ window.Tool9 = {
             rsiLength: document.getElementById("rsiLength").value,
             rank_window: document.getElementById("rankWindow").value,
             rank_presence: document.getElementById("rankPresence").value,
-            rank_cutoff: document.getElementById("rankCutoff").value            
+            rank_cutoff: document.getElementById("rankCutoff").value,
+            pe_min: document.getElementById("peMin").value,
+            pe_max: document.getElementById("peMax").value,
+            pb_max: document.getElementById("pbMax").value,
+            require_dividend: document.getElementById("requireDividend").value
         };
 
         try {
@@ -148,7 +177,11 @@ window.Tool9 = {
                 localStorage.setItem("rank_window", payload.rank_window);
                 localStorage.setItem("rank_presence", payload.rank_presence);
                 localStorage.setItem("rank_cutoff", payload.rank_cutoff);
-                
+                localStorage.setItem("pe_min", payload.pe_min);
+                localStorage.setItem("pe_max", payload.pe_max);
+                localStorage.setItem("pb_max", payload.pb_max);
+                localStorage.setItem("require_dividend", payload.require_dividend);
+
                 msg.textContent = "Settings saved";
                 msg.style.color = "#4ade80";
             } else {
