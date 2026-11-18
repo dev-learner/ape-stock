@@ -198,7 +198,7 @@ window.Tool5 = {
                             <td>${r.ts.substring(0,10)}</td>
                             <td>${r.type}</td>
                             <td>${r.symbol || ""}</td>
-                            <td>${(r.name || "").substring(0, 28)}</td>
+                            <td title="${r.name || ''}">${(r.name || "").substring(0, 32)}</td>
                             <td>${r.quantity || ""}</td>
                             <td>${r.price ? Number(r.price).toFixed(4) : ""}</td>
                             <td>${r.costs ? Number(r.costs).toFixed(2) : ""}</td>

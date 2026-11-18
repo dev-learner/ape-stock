@@ -532,3 +532,36 @@ canvas.spark {
     margin-bottom: 8px;
 }
 .tx-toolbar .left, .tx-toolbar .right { display: flex; gap: 8px; }
+
+/* Transactions table column widths & alignment */
+#tx-table th,
+#tx-table td {
+    text-align: right;
+    white-space: nowrap;
+}
+#tx-table th:nth-child(1), #tx-table td:nth-child(1),   /* # */
+#tx-table th:nth-child(2), #tx-table td:nth-child(2),   /* Date */
+#tx-table th:nth-child(3), #tx-table td:nth-child(3),   /* Type */
+#tx-table th:nth-child(4), #tx-table td:nth-child(4),   /* Symbol */
+#tx-table th:nth-child(5), #tx-table td:nth-child(5) {  /* Name */
+    text-align: left;
+}
+
+#tx-table th:nth-child(1), #tx-table td:nth-child(1) { width: 40px; }   /* # */
+#tx-table th:nth-child(2), #tx-table td:nth-child(2) { width: 100px; }  /* Date */
+#tx-table th:nth-child(3), #tx-table td:nth-child(3) { width: 90px; }   /* Type */
+#tx-table th:nth-child(4), #tx-table td:nth-child(4) { width: 80px; }   /* Symbol */
+#tx-table th:nth-child(5), #tx-table td:nth-child(5) { 
+    width: 220px; 
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}  /* Name */
+#tx-table th:nth-child(6), #tx-table td:nth-child(6) { width: 70px; }   /* Qty */
+#tx-table th:nth-child(7), #tx-table td:nth-child(7) { width: 80px; }   /* Price */
+#tx-table th:nth-child(8), #tx-table td:nth-child(8) { width: 80px; }   /* Costs */
+#tx-table th:nth-child(9), #tx-table td:nth-child(9) { width: 110px; }  /* Cash Impact */
+#tx-table th:nth-child(10), #tx-table td:nth-child(10) { 
+    text-align: left; 
+    width: auto;
+}  /* Notes */
