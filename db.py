@@ -172,6 +172,33 @@ def init_db():
             updated TEXT
         )
     """)
+    
+    # Portfolio
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            type TEXT NOT NULL,               -- DEPOSIT, WITHDRAW, BUY, SELL
+            symbol TEXT,
+            quantity REAL,
+            price REAL,
+            stamp_pct REAL,
+            costs REAL DEFAULT 0,
+            cash_impact REAL NOT NULL,
+            rank_at_date INTEGER,
+            notes TEXT,
+            created TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_positions (
+            symbol TEXT PRIMARY KEY,
+            quantity REAL NOT NULL,
+            avg_cost REAL NOT NULL,
+            updated TEXT
+        )
+    """)
 
     conn.commit()
     conn.close()

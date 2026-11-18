@@ -45,7 +45,12 @@ window.Tool9 = {
                 <label for="rankCutoff">Rank cut-off</label>
                 <input type="number" id="rankCutoff" min="5" max="50" step="1" value="12">
 
-                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">Valuation Filters (Tool 4)</h2>
+                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">
+                    Valuation Filters (Tool 4)
+                    <label style="font-size:0.95rem; font-weight:normal; margin-left:16px; color:#ddd; display:inline-flex; align-items:center; gap:6px;">
+                        Use? <input type="checkbox" id="useValuation" style="margin:0; width:16px; height:16px;">
+                    </label>
+                </h2>
 
                 <label for="peMin">Trailing PE min</label>
                 <input type="number" id="peMin" min="0" max="100" step="0.5" value="5">
@@ -61,6 +66,29 @@ window.Tool9 = {
                     <option value="1">Yes</option>
                     <option value="0">No</option>
                 </select>
+
+                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">Candidate Selection</h2>
+
+                <label for="candRank">Rank cut-off (Buy / Hold)</label>
+                <input type="number" id="candRank" min="1" max="100" step="1" value="12">
+
+                <label for="candRequireFaller">Require faller for Buy</label>
+                <select id="candRequireFaller">
+                    <option value="1">Yes</option>
+                    <option value="0">No</option>
+                </select>
+
+                <label for="candVs50Buy">vs 50MA min for Buy</label>
+                <input type="number" id="candVs50Buy" min="-50" max="50" step="0.1" value="0">
+
+                <label for="candVs200Buy">vs 200MA min for Buy</label>
+                <input type="number" id="candVs200Buy" min="-50" max="50" step="0.1" value="0">
+
+                <label for="candVs50Hold">vs 50MA min for Hold</label>
+                <input type="number" id="candVs50Hold" min="-50" max="50" step="0.1" value="0">
+
+                <label for="candVs50Sell">vs 50MA max for Sell</label>
+                <input type="number" id="candVs50Sell" min="-50" max="50" step="0.1" value="0">
 
                 <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">RSI Settings</h2>
 
@@ -112,6 +140,16 @@ window.Tool9 = {
             set("peMax", "pe_max");
             set("pbMax", "pb_max");
             set("requireDividend", "require_dividend");
+            set("candRank", "cand_rank");
+            set("candRequireFaller", "cand_require_faller");
+            set("candVs50Buy", "cand_vs50_buy");
+            set("candVs200Buy", "cand_vs200_buy");
+            set("candVs50Hold", "cand_vs50_hold");
+            set("candVs50Sell", "cand_vs50_sell");
+
+            if (s.use_valuation != null) {
+                document.getElementById("useValuation").checked = (s.use_valuation === "1");
+            }
 
             // Keep localStorage in sync
             if (s.listLimit) localStorage.setItem("listLimit", s.listLimit);
@@ -130,6 +168,13 @@ window.Tool9 = {
             if (s.pe_max) localStorage.setItem("pe_max", s.pe_max);
             if (s.pb_max) localStorage.setItem("pb_max", s.pb_max);
             if (s.require_dividend) localStorage.setItem("require_dividend", s.require_dividend);
+            if (s.use_valuation) localStorage.setItem("use_valuation", s.use_valuation);
+            if (s.cand_rank) localStorage.setItem("cand_rank", s.cand_rank);
+            if (s.cand_require_faller) localStorage.setItem("cand_require_faller", s.cand_require_faller);
+            if (s.cand_vs50_buy) localStorage.setItem("cand_vs50_buy", s.cand_vs50_buy);
+            if (s.cand_vs200_buy) localStorage.setItem("cand_vs200_buy", s.cand_vs200_buy);
+            if (s.cand_vs50_hold) localStorage.setItem("cand_vs50_hold", s.cand_vs50_hold);
+            if (s.cand_vs50_sell) localStorage.setItem("cand_vs50_sell", s.cand_vs50_sell);
         } catch (e) {
             console.warn("Could not load settings", e);
         }
@@ -153,7 +198,14 @@ window.Tool9 = {
             pe_min: document.getElementById("peMin").value,
             pe_max: document.getElementById("peMax").value,
             pb_max: document.getElementById("pbMax").value,
-            require_dividend: document.getElementById("requireDividend").value
+            require_dividend: document.getElementById("requireDividend").value,
+            use_valuation: document.getElementById("useValuation").checked ? "1" : "0",
+            cand_rank: document.getElementById("candRank").value,
+            cand_require_faller: document.getElementById("candRequireFaller").value,
+            cand_vs50_buy: document.getElementById("candVs50Buy").value,
+            cand_vs200_buy: document.getElementById("candVs200Buy").value,
+            cand_vs50_hold: document.getElementById("candVs50Hold").value,
+            cand_vs50_sell: document.getElementById("candVs50Sell").value
         };
 
         try {
@@ -165,23 +217,7 @@ window.Tool9 = {
 
             const msg = document.getElementById("settings-msg");
             if (res.ok) {
-                localStorage.setItem("listLimit", payload.listLimit);
-                localStorage.setItem("riserPct", payload.riserPct);
-                localStorage.setItem("fallerPct", payload.fallerPct);
-                localStorage.setItem("hitThreshold", payload.hitThreshold);
-                localStorage.setItem("notional", payload.notional);
-                localStorage.setItem("stampPct", payload.stampPct);
-                localStorage.setItem("rsiOversold", payload.rsiOversold);
-                localStorage.setItem("rsiOverbought", payload.rsiOverbought);
-                localStorage.setItem("rsiLength", payload.rsiLength);
-                localStorage.setItem("rank_window", payload.rank_window);
-                localStorage.setItem("rank_presence", payload.rank_presence);
-                localStorage.setItem("rank_cutoff", payload.rank_cutoff);
-                localStorage.setItem("pe_min", payload.pe_min);
-                localStorage.setItem("pe_max", payload.pe_max);
-                localStorage.setItem("pb_max", payload.pb_max);
-                localStorage.setItem("require_dividend", payload.require_dividend);
-
+                Object.keys(payload).forEach(k => localStorage.setItem(k, payload[k]));
                 msg.textContent = "Settings saved";
                 msg.style.color = "#4ade80";
             } else {

@@ -112,6 +112,14 @@ window.Tool4 = {
             const table = document.getElementById("screener-table");
             const trs = [...table.querySelectorAll("tbody tr")];
 
+            // Read candidate settings (defaults match previous hard-coded rules)
+            const rankCutoff = parseInt(localStorage.getItem("cand_rank") || "12", 10);
+            const requireFaller = (localStorage.getItem("cand_require_faller") || "1") === "1";
+            const vs50Buy = parseFloat(localStorage.getItem("cand_vs50_buy") || "0");
+            const vs200Buy = parseFloat(localStorage.getItem("cand_vs200_buy") || "0");
+            const vs50Hold = parseFloat(localStorage.getItem("cand_vs50_hold") || "0");
+            const vs50Sell = parseFloat(localStorage.getItem("cand_vs50_sell") || "0");
+
             trs.forEach(tr => {
                 const cells = tr.children;
                 const rankText = cells[3].textContent.trim();
@@ -121,11 +129,13 @@ window.Tool4 = {
                 const isFaller = cells[0].textContent.includes("🔴");
 
                 let signal = "";
-                if (!isNaN(rank) && rank <= 12 && isFaller && vs50 > 0 && vs200 > 0) {
+                if (!isNaN(rank) && rank <= rankCutoff &&
+                    (!requireFaller || isFaller) &&
+                    vs50 > vs50Buy && vs200 > vs200Buy) {
                     signal = "🟢 Buy";
-                } else if (!isNaN(rank) && rank <= 12 && vs50 >= 0) {
+                } else if (!isNaN(rank) && rank <= rankCutoff && vs50 >= vs50Hold) {
                     signal = "🟡 Hold";
-                } else if (!isNaN(vs50) && vs50 < 0) {
+                } else if (!isNaN(vs50) && vs50 < vs50Sell) {
                     signal = "🔴 Sell";
                 }
 

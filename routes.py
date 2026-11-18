@@ -86,6 +86,25 @@ def settings_save():
             except (ValueError, TypeError):
                 set_setting(key, default)
 
+    # Candidate selection settings
+    for key, default in (
+        ("cand_rank", 12),
+        ("cand_vs50_buy", 0.0),
+        ("cand_vs200_buy", 0.0),
+        ("cand_vs50_hold", 0.0),
+        ("cand_vs50_sell", 0.0),
+    ):
+        if key in data and data[key] is not None:
+            try:
+                val = float(data[key]) if "vs" in key else int(float(data[key]))
+                set_setting(key, val)
+            except (ValueError, TypeError):
+                set_setting(key, default)
+
+    if "cand_require_faller" in data and data["cand_require_faller"] is not None:
+        set_setting("cand_require_faller", "1" if str(data["cand_require_faller"]) in ("1", "true", "True") else "0")
+
+
     # Valuation filter settings
     for key, default in (
         ("pe_min", 5.0),
@@ -101,6 +120,9 @@ def settings_save():
 
     if "require_dividend" in data and data["require_dividend"] is not None:
         set_setting("require_dividend", "1" if str(data["require_dividend"]) in ("1", "true", "True") else "0")
+
+    if "use_valuation" in data and data["use_valuation"] is not None:
+        set_setting("use_valuation", "1" if str(data["use_valuation"]) in ("1", "true", "True") else "0")
 
     # All other settings stored as strings
     for key in ("listLimit", "riserPct", "fallerPct", "hitThreshold", "notional", "stampPct"):
@@ -127,6 +149,13 @@ def settings_get():
         "pe_max": get_setting("pe_max", "40"),
         "pb_max": get_setting("pb_max", "4"),
         "require_dividend": get_setting("require_dividend", "1"),
+        "use_valuation": get_setting("use_valuation", "0"),
+        "cand_rank": get_setting("cand_rank", "12"),
+        "cand_require_faller": get_setting("cand_require_faller", "1"),
+        "cand_vs50_buy": get_setting("cand_vs50_buy", "0"),
+        "cand_vs200_buy": get_setting("cand_vs200_buy", "0"),
+        "cand_vs50_hold": get_setting("cand_vs50_hold", "0"),
+        "cand_vs50_sell": get_setting("cand_vs50_sell", "0"),        
     })
 
 @bp.route("/status")
@@ -394,6 +423,7 @@ def screener():
     cur = conn.cursor()
 
     # Valuation filter settings
+    use_valuation = get_setting("use_valuation", "0") == "1"
     try:
         pe_min = float(get_setting("pe_min", "5"))
     except (TypeError, ValueError):
@@ -412,13 +442,16 @@ def screener():
     row = cur.fetchone()
     rank_date = row[0] if row and row[0] else None
 
-    valuation_sql = """
-        AND (f.pe_trailing IS NULL OR f.pe_trailing BETWEEN ? AND ?)
-        AND (f.price_to_book IS NULL OR f.price_to_book < ?)
-    """
-    valuation_params = [pe_min, pe_max, pb_max]
-    if require_div:
-        valuation_sql += " AND (f.dividend_yield IS NULL OR f.dividend_yield > 0)"
+    valuation_sql = ""
+    valuation_params = []
+    if use_valuation:
+        valuation_sql = """
+            AND (f.pe_trailing IS NULL OR f.pe_trailing BETWEEN ? AND ?)
+            AND (f.price_to_book IS NULL OR f.price_to_book < ?)
+        """
+        valuation_params = [pe_min, pe_max, pb_max]
+        if require_div:
+            valuation_sql += " AND (f.dividend_yield IS NULL OR f.dividend_yield > 0)"
 
     if mode == "full" and rank_date:
         cur.execute("""
