@@ -525,3 +525,10 @@ canvas.spark {
 #tx-container table th:nth-child(3),
 #tx-container table td:nth-child(3) { text-align: left; }
 
+.tx-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.tx-toolbar .left, .tx-toolbar .right { display: flex; gap: 8px; }

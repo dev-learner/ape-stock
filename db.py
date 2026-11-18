@@ -178,8 +178,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS portfolio_transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ts TEXT NOT NULL,
-            type TEXT NOT NULL,               -- DEPOSIT, WITHDRAW, BUY, SELL
+            type TEXT NOT NULL,
             symbol TEXT,
+            name TEXT,                    -- ← add this line
             quantity REAL,
             price REAL,
             stamp_pct REAL,

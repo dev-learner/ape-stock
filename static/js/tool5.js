@@ -57,10 +57,16 @@ window.Tool5 = {
             </table>
 
             <h3 style="margin-top:28px;">Transactions</h3>
-            <div class="portfolio-buttons" style="margin-bottom:8px;">
-                <button class="mini-btn filter-btn" data-filter="all">All</button>
-                <button class="mini-btn filter-btn" data-filter="cash">Cash</button>
-                <button class="mini-btn filter-btn" data-filter="shares">Shares</button>
+            <div class="tx-toolbar">
+                <div class="left">
+                    <button class="mini-btn filter-btn" data-filter="all">All</button>
+                    <button class="mini-btn filter-btn" data-filter="cash">Cash</button>
+                    <button class="mini-btn filter-btn" data-filter="shares">Shares</button>
+                </div>
+                <div class="right">
+                    <button id="btn-export" class="mini-btn filter-btn">Export</button>
+                    <button id="btn-import" class="mini-btn filter-btn">Import</button>
+                </div>
             </div>
             <div id="tx-container"></div>
 
@@ -126,6 +132,36 @@ window.Tool5 = {
                     </div>
                 </div>
             </div>
+
+            <!-- Export Modal -->
+            <div id="modal-export" class="modal-overlay">
+                <div class="modal-box">
+                    <h3>Export Transactions</h3>
+                    <label>Format</label>
+                    <select id="export-format">
+                        <option value="json">JSON</option>
+                        <option value="csv">CSV</option>
+                    </select>
+                    <div class="modal-actions">
+                        <button id="export-go" class="mini-btn filter-btn">Export</button>
+                        <button id="export-cancel" class="mini-btn">Cancel</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Import Modal -->
+            <div id="modal-import" class="modal-overlay">
+                <div class="modal-box">
+                    <h3>Import Transactions</h3>
+                    <p style="font-size:0.9rem; color:#94a3b8;">This will erase the current portfolio and replace it with the file contents.</p>
+                    <label>File (.json or .csv)</label>
+                    <input type="file" id="import-file" accept=".json,.csv">
+                    <div class="modal-actions">
+                        <button id="import-go" class="mini-btn filter-btn">Import</button>
+                        <button id="import-cancel" class="mini-btn">Cancel</button>
+                    </div>
+                </div>
+            </div>
         `;
 
         this.loadTransactions("all");
@@ -147,6 +183,7 @@ window.Tool5 = {
                         <th data-key="ts">Date</th>
                         <th data-key="type">Type</th>
                         <th data-key="symbol">Symbol</th>
+                        <th data-key="name">Name</th>
                         <th data-key="quantity">Qty</th>
                         <th data-key="price">Price</th>
                         <th data-key="costs">Costs</th>
@@ -161,6 +198,7 @@ window.Tool5 = {
                             <td>${r.ts.substring(0,10)}</td>
                             <td>${r.type}</td>
                             <td>${r.symbol || ""}</td>
+                            <td>${(r.name || "").substring(0, 28)}</td>
                             <td>${r.quantity || ""}</td>
                             <td>${r.price ? Number(r.price).toFixed(4) : ""}</td>
                             <td>${r.costs ? Number(r.costs).toFixed(2) : ""}</td>
@@ -202,15 +240,42 @@ window.Tool5 = {
         };
 
         document.querySelectorAll(".filter-btn").forEach(b => {
-            b.onclick = () => this.loadTransactions(b.dataset.filter);
+            if (b.dataset.filter) {
+                b.onclick = () => this.loadTransactions(b.dataset.filter);
+            }
         });
 
-        // Cash modal
+        document.getElementById("btn-export").onclick = () => show("modal-export");
+        document.getElementById("export-cancel").onclick = () => hide("modal-export");
+        document.getElementById("export-go").onclick = () => {
+            const fmt = document.getElementById("export-format").value;
+            window.location = `/portfolio/export?format=${fmt}`;
+            hide("modal-export");
+        };
+
+        document.getElementById("btn-import").onclick = () => show("modal-import");
+        document.getElementById("import-cancel").onclick = () => hide("modal-import");
+        document.getElementById("import-go").onclick = async () => {
+            const fileInput = document.getElementById("import-file");
+            if (!fileInput.files.length) { alert("Select a file"); return; }
+            if (!confirm("This will erase the current portfolio. Continue?")) return;
+
+            const form = new FormData();
+            form.append("file", fileInput.files[0]);
+            const res = await fetch("/portfolio/import", { method: "POST", body: form });
+            if (res.ok) {
+                hide("modal-import");
+                this.render();
+            } else {
+                const err = await res.json();
+                alert(err.error || "Import failed");
+            }
+        };
+
         document.getElementById("cash-cancel").onclick = () => hide("modal-cash");
         document.getElementById("cash-deposit").onclick = () => this.doCash("deposit");
         document.getElementById("cash-withdraw").onclick = () => this.doCash("withdraw");
 
-        // Buy modal
         document.getElementById("buy-cancel").onclick = () => hide("modal-buy");
         const updateBuy = () => {
             const qty = parseFloat(document.getElementById("buy-qty").value) || 0;
@@ -222,7 +287,6 @@ window.Tool5 = {
         };
         ["buy-qty", "buy-price"].forEach(id => document.getElementById(id).addEventListener("input", updateBuy));
 
-        // Symbol search
         const symInput = document.getElementById("buy-symbol");
         const resultsDiv = document.getElementById("buy-search-results");
         let searchTimer;
@@ -253,7 +317,6 @@ window.Tool5 = {
 
         document.getElementById("buy-save").onclick = () => this.doBuy();
 
-        // Sell modal
         document.getElementById("sell-cancel").onclick = () => hide("modal-sell");
         const updateSell = () => {
             const qty = parseFloat(document.getElementById("sell-qty").value) || 0;

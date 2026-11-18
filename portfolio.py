@@ -1,8 +1,11 @@
 # portfolio.py
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 from db import get_db, get_setting
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import csv
+import io
+import json
 
 bp = Blueprint("portfolio", __name__)
 UK = ZoneInfo("Europe/London")
@@ -23,6 +26,12 @@ def _get_rank(cur, symbol, date_str):
     row = cur.fetchone()
     return row[0] if row else None
 
+def _get_name(cur, symbol):
+    """Look up company name from index_quotes."""
+    cur.execute("SELECT name FROM index_quotes WHERE symbol = ?", (symbol,))
+    row = cur.fetchone()
+    return row["name"] if row else None
+
 @bp.route("/portfolio/summary")
 def summary():
     """Return cash, total value, P/L % and current positions."""
@@ -40,13 +49,11 @@ def summary():
     positions = []
     holdings_value = 0.0
     for r in cur.fetchall():
-        # Live price is in pence
         last_pence = r["price"] or (r["avg_cost"] * 100)
         last_pounds = last_pence / 100.0
         value = r["quantity"] * last_pounds
         holdings_value += value
 
-        # Total cost = (qty × avg price) + stamp paid on buys
         cur.execute("""
             SELECT COALESCE(SUM(costs), 0) FROM portfolio_transactions
             WHERE symbol = ? AND type = 'BUY'
@@ -57,7 +64,6 @@ def summary():
         pnl = value - total_cost
         pnl_pct = (pnl / total_cost * 100) if total_cost else 0.0
 
-        # Most recent transaction timestamp (for optional use)
         cur.execute("""
             SELECT MAX(ts) FROM portfolio_transactions WHERE symbol = ?
         """, (r["symbol"],))
@@ -116,7 +122,7 @@ def cash_transaction():
     """Record a cash deposit or withdrawal."""
     data = request.get_json(silent=True) or {}
     amount = float(data.get("amount", 0))
-    action = data.get("action")  # deposit or withdraw
+    action = data.get("action")
     date_str = data.get("date") or datetime.now(UK).date().isoformat()
 
     if amount <= 0 or action not in ("deposit", "withdraw"):
@@ -164,17 +170,17 @@ def buy():
         conn.close()
         return jsonify({"error": "Insufficient cash"}), 400
 
+    name = _get_name(cur, symbol)
     rank = _get_rank(cur, symbol, date_str)
     notes = f"Rank: {rank if rank is not None else 'n/a'}"
     ts = f"{date_str}T12:00:00"
 
     cur.execute("""
         INSERT INTO portfolio_transactions
-        (ts, type, symbol, quantity, price, stamp_pct, costs, cash_impact, rank_at_date, notes)
-        VALUES (?, 'BUY', ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (ts, symbol, qty, price, stamp_pct, costs, -total, rank, notes))
+        (ts, type, symbol, name, quantity, price, stamp_pct, costs, cash_impact, rank_at_date, notes)
+        VALUES (?, 'BUY', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (ts, symbol, name, qty, price, stamp_pct, costs, -total, rank, notes))
 
-    # Update or create position (average cost, ex-stamp)
     cur.execute("SELECT quantity, avg_cost FROM portfolio_positions WHERE symbol = ?", (symbol,))
     row = cur.fetchone()
     if row:
@@ -209,12 +215,13 @@ def sell():
 
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT quantity, avg_cost FROM portfolio_positions WHERE symbol = ?", (symbol,))
+    cur.execute("SELECT quantity FROM portfolio_positions WHERE symbol = ?", (symbol,))
     row = cur.fetchone()
     if not row or row["quantity"] < qty:
         conn.close()
         return jsonify({"error": "Insufficient quantity"}), 400
 
+    name = _get_name(cur, symbol)
     proceeds = qty * price
     rank = _get_rank(cur, symbol, date_str)
     notes = f"Rank: {rank if rank is not None else 'n/a'}"
@@ -222,9 +229,9 @@ def sell():
 
     cur.execute("""
         INSERT INTO portfolio_transactions
-        (ts, type, symbol, quantity, price, cash_impact, rank_at_date, notes)
-        VALUES (?, 'SELL', ?, ?, ?, ?, ?, ?)
-    """, (ts, symbol, qty, price, proceeds, rank, notes))
+        (ts, type, symbol, name, quantity, price, cash_impact, rank_at_date, notes)
+        VALUES (?, 'SELL', ?, ?, ?, ?, ?, ?, ?)
+    """, (ts, symbol, name, qty, price, proceeds, rank, notes))
 
     new_qty = row["quantity"] - qty
     if new_qty <= 0:
@@ -240,11 +247,110 @@ def sell():
 
 @bp.route("/portfolio/reset", methods=["POST"])
 def reset():
-    """Development helper — wipe all portfolio data."""
+    """Development helper — wipe all portfolio data and reset auto-increment."""
     conn = get_db()
     cur = conn.cursor()
     cur.execute("DELETE FROM portfolio_transactions")
     cur.execute("DELETE FROM portfolio_positions")
+    cur.execute("DELETE FROM sqlite_sequence WHERE name = 'portfolio_transactions'")
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
+
+@bp.route("/portfolio/export")
+def export():
+    """Export all transactions as JSON or CSV."""
+    fmt = request.args.get("format", "json").lower()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM portfolio_transactions ORDER BY id")
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    stamp = datetime.now(UK).strftime("%d-%m-%Y_%H-%M-%S")
+    filename = f"ape-stock_transactions_{stamp}"
+
+    if fmt == "csv":
+        output = io.StringIO()
+        if rows:
+            writer = csv.DictWriter(output, fieldnames=rows[0].keys())
+            writer.writeheader()
+            writer.writerows(rows)
+        return Response(
+            output.getvalue(),
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}.csv"}
+        )
+    else:
+        return Response(
+            json.dumps(rows, indent=2),
+            mimetype="application/json",
+            headers={"Content-Disposition": f"attachment; filename={filename}.json"}
+        )
+
+@bp.route("/portfolio/import", methods=["POST"])
+def import_data():
+    """Wipe portfolio and import transactions from uploaded JSON or CSV."""
+    if "file" not in request.files:
+        return jsonify({"error": "No file"}), 400
+    f = request.files["file"]
+    name = (f.filename or "").lower()
+    raw = f.read().decode("utf-8")
+
+    try:
+        if name.endswith(".json"):
+            rows = json.loads(raw)
+        elif name.endswith(".csv"):
+            reader = csv.DictReader(io.StringIO(raw))
+            rows = list(reader)
+        else:
+            return jsonify({"error": "Unsupported file type"}), 400
+    except Exception as e:
+        return jsonify({"error": f"Parse error: {e}"}), 400
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM portfolio_transactions")
+    cur.execute("DELETE FROM portfolio_positions")
+    cur.execute("DELETE FROM sqlite_sequence WHERE name = 'portfolio_transactions'")
+
+    for r in rows:
+        cur.execute("""
+            INSERT INTO portfolio_transactions
+            (ts, type, symbol, name, quantity, price, stamp_pct, costs, cash_impact, rank_at_date, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            r.get("ts"),
+            r.get("type"),
+            r.get("symbol") or None,
+            r.get("name") or None,
+            float(r["quantity"]) if r.get("quantity") else None,
+            float(r["price"]) if r.get("price") else None,
+            float(r["stamp_pct"]) if r.get("stamp_pct") else None,
+            float(r["costs"]) if r.get("costs") else 0,
+            float(r.get("cash_impact") or 0),
+            int(r["rank_at_date"]) if r.get("rank_at_date") else None,
+            r.get("notes")
+        ))
+
+    # Rebuild positions
+    cur.execute("""
+        SELECT symbol,
+               SUM(CASE WHEN type='BUY' THEN quantity ELSE -quantity END) AS qty,
+               SUM(CASE WHEN type='BUY' THEN quantity * price ELSE 0 END) AS cost_sum,
+               SUM(CASE WHEN type='BUY' THEN quantity ELSE 0 END) AS buy_qty
+        FROM portfolio_transactions
+        WHERE type IN ('BUY','SELL') AND symbol IS NOT NULL
+        GROUP BY symbol
+        HAVING qty > 0
+    """)
+    for row in cur.fetchall():
+        avg = row["cost_sum"] / row["buy_qty"] if row["buy_qty"] else 0
+        cur.execute("""
+            INSERT INTO portfolio_positions (symbol, quantity, avg_cost, updated)
+            VALUES (?, ?, ?, datetime('now'))
+        """, (row["symbol"], row["qty"], avg))
+
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "imported": len(rows)})

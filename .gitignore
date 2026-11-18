@@ -16,6 +16,10 @@ __pycache__/
 *.sqlite3
 ape_stock.db
 
+# Files you don't want committed
+etoro-transactions.txt
+handover-prompt.txt
+
 # SQLite temporary files
 *.db-shm
 *.db-wal
