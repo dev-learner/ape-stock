@@ -39,9 +39,10 @@ window.Dashboard = {
                 <!-- Overview -->
                 <div class="card">
                     <h3>Ape-Stock Overview</h3>
-                    <p>ape-stock has evolved from a simple “buy the big fallers” tool into a decision-support system for discretionary dip-buying on pre-qualified names.</p>
-                    <p>The Screener surfaces relatively stable, higher-quality FTSE names (trend + size). Persistence at the top of that list has shown strong historical edge. Tool 8 still shows the day’s movers so you can see dips inside the better names. Tool 3 tracks the positions you actually take, with charts and context.</p>
-                    <p style="color:#fbbf24;"><strong>Note:</strong> The user is still learning. The strategy is shifting from mechanical dip-buying toward “buy success after serious analysis” — filters, persistence, news awareness, and live monitoring matter more than raw faller size.</p>
+                    <p>ape-stock is a personal decision-support tool for discretionary trading on the FTSE. It does not place trades or promise predictions.</p>
+                    <p>Its job is to shrink a noisy universe into a short, ranked list of higher-quality candidates and then give the user a clean place to record and monitor the positions they actually take.</p><br>
+                    <p><strong>Core workflow</strong></p>
+                    <p>Risers / Fallers → Technical Analysis (persistence rank) → Fundamentals → Candidates (joined short-list) → Holdings Tracker → pre-buy checklist → Portfolio.</p><br>
                 </div>
 
                 <!-- Notes -->

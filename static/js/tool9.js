@@ -1,146 +1,175 @@
 // static/js/tool9.js
 window.Tool9 = {
+    defaults: {
+        listLimit: "25",
+        riserPct: "3",
+        fallerPct: "3",
+        hitThreshold: "50",
+        notional: "500",
+        stampPct: "0.5",
+        tracker_close_target: "3",
+        rank_window: "35",
+        rank_presence: "50",
+        rank_cutoff: "12",
+        pe_min: "5",
+        pe_max: "40",
+        pb_max: "4",
+        require_dividend: "0",
+        use_valuation: "0",
+        cand_rank_max: "12",
+        cand_pe_min: "5",
+        cand_pe_max: "40",
+        cand_pb_max: "4",
+        cand_require_div: "0",
+        rsiOversold: "30",
+        rsiOverbought: "70",
+        rsiLength: "7"
+    },
+
     async show() {
         const container = document.getElementById("results");
         container.innerHTML = `
-            <div class="settings-container" style="max-width:640px; margin:0 auto; padding:8px 0;">
-                <h1>Settings</h1>
+            <div class="settings-page" style="max-width:1100px; margin:0 auto; padding:8px 0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                    <h1 style="margin:0;">Settings</h1>
+                    <button id="saveBtn" class="mini-btn" style="background:#1e5c3a; padding:8px 16px;">Save Settings</button>
+                </div>
+                <div id="settings-msg" style="min-height:1.4em; margin-bottom:8px;"></div>
 
-                <label for="listLimit">Limit Lists</label>
-                <select id="listLimit">
-                    <option value="5">5</option>
-                    <option value="10">10</option>
-                    <option value="15">15</option>
-                    <option value="20">20</option>
-                    <option value="25">25</option>
-                    <option value="all">All</option>
-                </select>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px;">
 
-                <label for="riserPct">Riser % threshold</label>
-                <input type="number" id="riserPct" min="0" max="20" step="0.5" value="3">
+                    <!-- Lists & Thresholds -->
+                    <div class="card">
+                        <h3>Lists & Thresholds</h3>
+                        <label>Limit Lists</label>
+                        <select id="listLimit">
+                            <option value="5">5</option>
+                            <option value="10">10</option>
+                            <option value="15">15</option>
+                            <option value="20">20</option>
+                            <option value="25">25</option>
+                            <option value="all">All</option>
+                        </select>
+                        <label>Riser % threshold</label>
+                        <input type="number" id="riserPct" min="0" max="20" step="0.5">
+                        <label>Faller % threshold</label>
+                        <input type="number" id="fallerPct" min="0" max="20" step="0.5">
+                        <label>Hit threshold (%)</label>
+                        <input type="number" id="hitThreshold" min="0" max="100" step="5">
+                        <div style="text-align:right; margin-top:12px;">
+                            <button class="mini-btn restore" data-section="lists">Restore Defaults</button>
+                        </div>
+                    </div>
 
-                <label for="fallerPct">Faller % threshold</label>
-                <input type="number" id="fallerPct" min="0" max="20" step="0.5" value="3">
+                    <!-- Position & Costs -->
+                    <div class="card">
+                        <h3>Position & Costs</h3>
+                        <label>Default Notional (£)</label>
+                        <input type="number" id="notional" min="100" step="50">
+                        <label>Stamp Duty (%)</label>
+                        <input type="number" id="stampPct" min="0" max="5" step="0.1">
+                        <label>Tracker Close Target (%)</label>
+                        <input type="number" id="trackerCloseTarget" min="1" max="10" step="0.5">
+                        <div style="text-align:right; margin-top:12px;">
+                            <button class="mini-btn restore" data-section="position">Restore Defaults</button>
+                        </div>
+                    </div>
 
-                <label for="hitThreshold">Hit threshold (%)</label>
-                <input type="number" id="hitThreshold" min="0" max="100" step="5" value="50">
+                    <!-- Ranking -->
+                    <div class="card">
+                        <h3>Ranking</h3>
+                        <label>Persistence window (days)</label>
+                        <input type="number" id="rankWindow" min="5" max="120" step="1">
+                        <label>Minimum presence (%)</label>
+                        <input type="number" id="rankPresence" min="10" max="100" step="1">
+                        <label>Rank cut-off</label>
+                        <input type="number" id="rankCutoff" min="5" max="50" step="1">
+                        <div style="text-align:right; margin-top:12px;">
+                            <button class="mini-btn restore" data-section="ranking">Restore Defaults</button>
+                        </div>
+                    </div>
 
-                <label for="notional">Default Notional (£)</label>
-                <input type="number" id="notional" min="100" step="50" value="500">
+                    <!-- Valuation Filters -->
+                    <div class="card">
+                        <h3>Valuation Filters (Tool 4)</h3>
+                        <label style="display:flex; align-items:center; gap:8px;">
+                            Use valuation filters <input type="checkbox" id="useValuation">
+                        </label>
+                        <label>Trailing PE min</label>
+                        <input type="number" id="peMin" min="0" max="100" step="0.5">
+                        <label>Trailing PE max</label>
+                        <input type="number" id="peMax" min="0" max="200" step="0.5">
+                        <label>Price / Book max</label>
+                        <input type="number" id="pbMax" min="0" max="20" step="0.1">
+                        <label>Require positive dividend yield</label>
+                        <select id="requireDividend">
+                            <option value="1">Yes</option>
+                            <option value="0">No</option>
+                        </select>
+                        <div style="text-align:right; margin-top:12px;">
+                            <button class="mini-btn restore" data-section="valuation">Restore Defaults</button>
+                        </div>
+                    </div>
 
-                <label for="stampPct">Stamp Duty (%)</label>
-                <input type="number" id="stampPct" min="0" max="5" step="0.1" value="0.5">
+                    <!-- Candidates (Tool 7) -->
+                    <div class="card">
+                        <h3>Candidates (Tool 7)</h3>
+                        <label>Rank cut-off (max)</label>
+                        <input type="number" id="candRankMax" min="1" max="100" step="1">
+                        <label>Trailing PE min</label>
+                        <input type="number" id="candPeMin" min="0" max="100" step="0.5">
+                        <label>Trailing PE max</label>
+                        <input type="number" id="candPeMax" min="0" max="200" step="0.5">
+                        <label>Price / Book max</label>
+                        <input type="number" id="candPbMax" min="0" max="20" step="0.1">
+                        <label>Require positive dividend yield</label>
+                        <select id="candRequireDiv">
+                            <option value="0">No</option>
+                            <option value="1">Yes</option>
+                        </select>
+                        <div style="text-align:right; margin-top:12px;">
+                            <button class="mini-btn restore" data-section="candidates">Restore Defaults</button>
+                        </div>
+                    </div>
 
-                <label for="trackerCloseTarget">Tracker Close Target (%)</label>
-                <input type="number" id="trackerCloseTarget" min="1" max="10" step="0.5" value="3">
+                    <!-- RSI -->
+                    <div class="card">
+                        <h3>RSI Settings</h3>
+                        <label>Oversold Below</label>
+                        <input type="number" id="rsiOversold" min="1" max="50" step="1">
+                        <label>Overbought Above</label>
+                        <input type="number" id="rsiOverbought" min="50" max="100" step="1">
+                        <label>Length</label>
+                        <input type="number" id="rsiLength" min="1" max="30" step="1">
+                        <div style="text-align:right; margin-top:12px;">
+                            <button class="mini-btn restore" data-section="rsi">Restore Defaults</button>
+                        </div>
+                    </div>
 
-                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">Ranking</h2>
-
-                <label for="rankWindow">Persistence window (days)</label>
-                <input type="number" id="rankWindow" min="5" max="120" step="1" value="35">
-
-                <label for="rankPresence">Minimum presence (%)</label>
-                <input type="number" id="rankPresence" min="10" max="100" step="1" value="50">
-
-                <label for="rankCutoff">Rank cut-off</label>
-                <input type="number" id="rankCutoff" min="5" max="50" step="1" value="12">
-
-                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">
-                    Valuation Filters (Tool 4)
-                    <label style="font-size:0.95rem; font-weight:normal; margin-left:16px; color:#ddd; display:inline-flex; align-items:center; gap:6px;">
-                        Use? <input type="checkbox" id="useValuation" style="margin:0; width:16px; height:16px;">
-                    </label>
-                </h2>
-
-                <label for="peMin">Trailing PE min</label>
-                <input type="number" id="peMin" min="0" max="100" step="0.5" value="5">
-
-                <label for="peMax">Trailing PE max</label>
-                <input type="number" id="peMax" min="0" max="200" step="0.5" value="40">
-
-                <label for="pbMax">Price / Book max</label>
-                <input type="number" id="pbMax" min="0" max="20" step="0.1" value="4">
-
-                <label for="requireDividend">Require positive dividend yield</label>
-                <select id="requireDividend">
-                    <option value="1">Yes</option>
-                    <option value="0">No</option>
-                </select>
-
-                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">Candidate Selection</h2>
-
-                <label for="candRank">Rank cut-off (Buy / Hold)</label>
-                <input type="number" id="candRank" min="1" max="100" step="1" value="12">
-
-                <label for="candRequireFaller">Require faller for Buy</label>
-                <select id="candRequireFaller">
-                    <option value="1">Yes</option>
-                    <option value="0">No</option>
-                </select>
-
-                <label for="candVs50Buy">vs 50MA min for Buy</label>
-                <input type="number" id="candVs50Buy" min="-50" max="50" step="0.1" value="0">
-
-                <label for="candVs200Buy">vs 200MA min for Buy</label>
-                <input type="number" id="candVs200Buy" min="-50" max="50" step="0.1" value="0">
-
-                <label for="candVs50Hold">vs 50MA min for Hold</label>
-                <input type="number" id="candVs50Hold" min="-50" max="50" step="0.1" value="0">
-
-                <label for="candVs50Sell">vs 50MA max for Sell</label>
-                <input type="number" id="candVs50Sell" min="-50" max="50" step="0.1" value="0">
-
-                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">Candidates (Tool 7)</h2>
-
-                <label for="candRankMax">Rank cut-off (max)</label>
-                <input type="number" id="candRankMax" min="1" max="100" step="1" value="12">
-
-                <label for="candPeMin">Trailing PE min</label>
-                <input type="number" id="candPeMin" min="0" max="100" step="0.5" value="5">
-
-                <label for="candPeMax">Trailing PE max</label>
-                <input type="number" id="candPeMax" min="0" max="200" step="0.5" value="40">
-
-                <label for="candPbMax">Price / Book max</label>
-                <input type="number" id="candPbMax" min="0" max="20" step="0.1" value="4">
-
-                <label for="candRequireDiv">Require positive dividend yield</label>
-                <select id="candRequireDiv">
-                    <option value="0">No</option>
-                    <option value="1">Yes</option>
-                </select>
-
-                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">RSI Settings</h2>
-
-                <label for="rsiOversold">Oversold Below</label>
-                <input type="number" id="rsiOversold" min="1" max="50" step="1" value="30">
-
-                <label for="rsiOverbought">Overbought Above</label>
-                <input type="number" id="rsiOverbought" min="50" max="100" step="1" value="70">
-
-                <label for="rsiLength">Length</label>
-                <input type="number" id="rsiLength" min="1" max="30" step="1" value="7">
-
-                <button id="saveBtn">Save Settings</button>
-                <div id="settings-msg"></div>
+                </div>
             </div>`;
 
         await this.loadSettings();
+        this.bindEvents();
+    },
 
-        document.getElementById("saveBtn").addEventListener("click", () => this.saveSettings());
+    bindEvents() {
+        document.getElementById("saveBtn").onclick = () => this.saveSettings();
+
+        document.querySelectorAll(".restore").forEach(btn => {
+            btn.onclick = () => this.restoreSection(btn.dataset.section);
+        });
     },
 
     async loadSettings() {
         try {
             const res = await fetch("/settings/get");
-            if (!res.ok) return;
-            const s = await res.json();
+            const s = res.ok ? await res.json() : {};
+            const merged = { ...this.defaults, ...s };
 
             const set = (id, key) => {
-                if (s[key] != null) {
-                    const el = document.getElementById(id);
-                    if (el) el.value = s[key];
-                }
+                const el = document.getElementById(id);
+                if (el && merged[key] != null) el.value = merged[key];
             };
 
             set("listLimit", "listLimit");
@@ -150,9 +179,6 @@ window.Tool9 = {
             set("notional", "notional");
             set("stampPct", "stampPct");
             set("trackerCloseTarget", "tracker_close_target");
-            set("rsiOversold", "rsiOversold");
-            set("rsiOverbought", "rsiOverbought");
-            set("rsiLength", "rsiLength");
             set("rankWindow", "rank_window");
             set("rankPresence", "rank_presence");
             set("rankCutoff", "rank_cutoff");
@@ -160,54 +186,68 @@ window.Tool9 = {
             set("peMax", "pe_max");
             set("pbMax", "pb_max");
             set("requireDividend", "require_dividend");
-            set("candRank", "cand_rank");
-            set("candRequireFaller", "cand_require_faller");
-            set("candVs50Buy", "cand_vs50_buy");
-            set("candVs200Buy", "cand_vs200_buy");
-            set("candVs50Hold", "cand_vs50_hold");
-            set("candVs50Sell", "cand_vs50_sell");
             set("candRankMax", "cand_rank_max");
             set("candPeMin", "cand_pe_min");
             set("candPeMax", "cand_pe_max");
             set("candPbMax", "cand_pb_max");
             set("candRequireDiv", "cand_require_div");
+            set("rsiOversold", "rsiOversold");
+            set("rsiOverbought", "rsiOverbought");
+            set("rsiLength", "rsiLength");
 
-            if (s.use_valuation != null) {
-                document.getElementById("useValuation").checked = (s.use_valuation === "1");
-            }
-
-            // Keep localStorage in sync
-            if (s.listLimit) localStorage.setItem("listLimit", s.listLimit);
-            if (s.riserPct) localStorage.setItem("riserPct", s.riserPct);
-            if (s.fallerPct) localStorage.setItem("fallerPct", s.fallerPct);
-            if (s.hitThreshold) localStorage.setItem("hitThreshold", s.hitThreshold);
-            if (s.notional) localStorage.setItem("notional", s.notional);
-            if (s.stampPct) localStorage.setItem("stampPct", s.stampPct);
-            if (s.rsiOversold) localStorage.setItem("rsiOversold", s.rsiOversold);
-            if (s.rsiOverbought) localStorage.setItem("rsiOverbought", s.rsiOverbought);
-            if (s.rsiLength) localStorage.setItem("rsiLength", s.rsiLength);
-            if (s.rank_window) localStorage.setItem("rank_window", s.rank_window);
-            if (s.rank_presence) localStorage.setItem("rank_presence", s.rank_presence);
-            if (s.rank_cutoff) localStorage.setItem("rank_cutoff", s.rank_cutoff);
-            if (s.pe_min) localStorage.setItem("pe_min", s.pe_min);
-            if (s.pe_max) localStorage.setItem("pe_max", s.pe_max);
-            if (s.pb_max) localStorage.setItem("pb_max", s.pb_max);
-            if (s.require_dividend) localStorage.setItem("require_dividend", s.require_dividend);
-            if (s.use_valuation) localStorage.setItem("use_valuation", s.use_valuation);
-            if (s.cand_rank) localStorage.setItem("cand_rank", s.cand_rank);
-            if (s.cand_require_faller) localStorage.setItem("cand_require_faller", s.cand_require_faller);
-            if (s.cand_vs50_buy) localStorage.setItem("cand_vs50_buy", s.cand_vs50_buy);
-            if (s.cand_vs200_buy) localStorage.setItem("cand_vs200_buy", s.cand_vs200_buy);
-            if (s.cand_vs50_hold) localStorage.setItem("cand_vs50_hold", s.cand_vs50_hold);
-            if (s.cand_vs50_sell) localStorage.setItem("cand_vs50_sell", s.cand_vs50_sell);
-            if (s.cand_rank_max) localStorage.setItem("cand_rank_max", s.cand_rank_max);
-            if (s.cand_pe_min) localStorage.setItem("cand_pe_min", s.cand_pe_min);
-            if (s.cand_pe_max) localStorage.setItem("cand_pe_max", s.cand_pe_max);
-            if (s.cand_pb_max) localStorage.setItem("cand_pb_max", s.cand_pb_max);
-            if (s.cand_require_div) localStorage.setItem("cand_require_div", s.cand_require_div);
+            const useVal = document.getElementById("useValuation");
+            if (useVal) useVal.checked = (merged.use_valuation === "1");
         } catch (e) {
             console.warn("Could not load settings", e);
         }
+    },
+
+    restoreSection(section) {
+        const map = {
+            lists: ["listLimit", "riserPct", "fallerPct", "hitThreshold"],
+            position: ["notional", "stampPct", "trackerCloseTarget"],
+            ranking: ["rankWindow", "rankPresence", "rankCutoff"],
+            valuation: ["peMin", "peMax", "pbMax", "requireDividend"],
+            candidates: ["candRankMax", "candPeMin", "candPeMax", "candPbMax", "candRequireDiv"],
+            rsi: ["rsiOversold", "rsiOverbought", "rsiLength"]
+        };
+        const keys = map[section] || [];
+        keys.forEach(id => {
+            const el = document.getElementById(id);
+            const key = this.idToKey(id);
+            if (el && this.defaults[key] != null) el.value = this.defaults[key];
+        });
+        if (section === "valuation") {
+            document.getElementById("useValuation").checked = (this.defaults.use_valuation === "1");
+        }
+    },
+
+    idToKey(id) {
+        const map = {
+            listLimit: "listLimit",
+            riserPct: "riserPct",
+            fallerPct: "fallerPct",
+            hitThreshold: "hitThreshold",
+            notional: "notional",
+            stampPct: "stampPct",
+            trackerCloseTarget: "tracker_close_target",
+            rankWindow: "rank_window",
+            rankPresence: "rank_presence",
+            rankCutoff: "rank_cutoff",
+            peMin: "pe_min",
+            peMax: "pe_max",
+            pbMax: "pb_max",
+            requireDividend: "require_dividend",
+            candRankMax: "cand_rank_max",
+            candPeMin: "cand_pe_min",
+            candPeMax: "cand_pe_max",
+            candPbMax: "cand_pb_max",
+            candRequireDiv: "cand_require_div",
+            rsiOversold: "rsiOversold",
+            rsiOverbought: "rsiOverbought",
+            rsiLength: "rsiLength"
+        };
+        return map[id] || id;
     },
 
     async saveSettings() {
@@ -219,9 +259,6 @@ window.Tool9 = {
             notional: document.getElementById("notional").value,
             stampPct: document.getElementById("stampPct").value,
             tracker_close_target: document.getElementById("trackerCloseTarget").value,
-            rsiOversold: document.getElementById("rsiOversold").value,
-            rsiOverbought: document.getElementById("rsiOverbought").value,
-            rsiLength: document.getElementById("rsiLength").value,
             rank_window: document.getElementById("rankWindow").value,
             rank_presence: document.getElementById("rankPresence").value,
             rank_cutoff: document.getElementById("rankCutoff").value,
@@ -230,36 +267,33 @@ window.Tool9 = {
             pb_max: document.getElementById("pbMax").value,
             require_dividend: document.getElementById("requireDividend").value,
             use_valuation: document.getElementById("useValuation").checked ? "1" : "0",
-            cand_rank: document.getElementById("candRank").value,
-            cand_require_faller: document.getElementById("candRequireFaller").value,
-            cand_vs50_buy: document.getElementById("candVs50Buy").value,
-            cand_vs200_buy: document.getElementById("candVs200Buy").value,
-            cand_vs50_hold: document.getElementById("candVs50Hold").value,
-            cand_vs50_sell: document.getElementById("candVs50Sell").value,
             cand_rank_max: document.getElementById("candRankMax").value,
             cand_pe_min: document.getElementById("candPeMin").value,
             cand_pe_max: document.getElementById("candPeMax").value,
             cand_pb_max: document.getElementById("candPbMax").value,
-            cand_require_div: document.getElementById("candRequireDiv").value
+            cand_require_div: document.getElementById("candRequireDiv").value,
+            rsiOversold: document.getElementById("rsiOversold").value,
+            rsiOverbought: document.getElementById("rsiOverbought").value,
+            rsiLength: document.getElementById("rsiLength").value
         };
 
         try {
             const res = await fetch("/settings/save", {
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
             });
-
             const msg = document.getElementById("settings-msg");
             if (res.ok) {
                 Object.keys(payload).forEach(k => localStorage.setItem(k, payload[k]));
                 msg.textContent = "Settings saved";
                 msg.style.color = "#4ade80";
+                msg.style.fontWeight = "600";
             } else {
                 msg.textContent = "Save failed";
                 msg.style.color = "#f87171";
             }
-            setTimeout(() => { msg.textContent = ""; }, 2000);
+            setTimeout(() => { msg.textContent = ""; }, 1800);
         } catch (e) {
             document.getElementById("settings-msg").textContent = "Save error";
         }

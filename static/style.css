@@ -595,3 +595,19 @@ canvas.spark {
     text-align: center;
     width: 40px;
 }
+
+.settings-page .card label {
+    display: block;
+    margin: 10px 0 4px;
+    font-size: 0.9rem;
+}
+.settings-page .card input,
+.settings-page .card select {
+    display: block;
+    width: 100%;
+    margin-bottom: 6px;
+    box-sizing: border-box;
+}
+.settings-page .card h3 {
+    margin-top: 0;
+}

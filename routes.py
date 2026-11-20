@@ -83,8 +83,6 @@ def settings_save():
         "rsiOversold", "rsiOverbought", "rsiLength",
         "rank_window", "rank_presence", "rank_cutoff",
         "pe_min", "pe_max", "pb_max", "require_dividend",
-        "cand_rank", "cand_require_faller",
-        "cand_vs50_buy", "cand_vs200_buy", "cand_vs50_hold", "cand_vs50_sell",
         "cand_rank_max", "cand_pe_min", "cand_pe_max", "cand_pb_max", "cand_require_div"
     ):
         if key in data and data[key] is not None:
@@ -111,12 +109,6 @@ def settings_get():
         "pb_max": get_setting("pb_max", "4"),
         "require_dividend": get_setting("require_dividend", "0"),
         "use_valuation": get_setting("use_valuation", "0"),
-        "cand_rank": get_setting("cand_rank", "12"),
-        "cand_require_faller": get_setting("cand_require_faller", "1"),
-        "cand_vs50_buy": get_setting("cand_vs50_buy", "0"),
-        "cand_vs200_buy": get_setting("cand_vs200_buy", "0"),
-        "cand_vs50_hold": get_setting("cand_vs50_hold", "0"),
-        "cand_vs50_sell": get_setting("cand_vs50_sell", "0"),
         "rsiOversold": get_setting("rsiOversold", "30"),
         "rsiOverbought": get_setting("rsiOverbought", "70"),
         "rsiLength": get_setting("rsiLength", "7"),
