@@ -54,6 +54,42 @@ window.Dashboard = {
                     </div>
                 </div>
 
+                <!-- Buy Checklist -->
+                <div class="card">
+                    <h3>Buy Check List</h3>
+                    <div class="section" style="font-size:0.88rem; line-height:1.5;">
+                        <strong>1. Screener confirmation</strong><br>
+                        □ Top tier of at least one screener<br>
+                        □ Still meets core technical conditions<br>
+                        □ Note rank / score & date<br><br>
+
+                        <strong>2. Fundamental sense-check</strong><br>
+                        □ PE / P/B not extreme<br>
+                        □ Not a persistent loss-maker<br>
+                        □ Adequate size & liquidity<br><br>
+
+                        <strong>3. News & events (7–14 days)</strong><br>
+                        □ No fresh profit warning / negative RNS<br>
+                        □ No imminent earnings or ex-div surprise<br>
+                        □ Sector news not contradictory<br><br>
+
+                        <strong>4. Portfolio fit</strong><br>
+                        □ Cash available<br>
+                        □ Position size within limits<br>
+                        □ Not over-exposed to sector<br><br>
+
+                        <strong>5. Trade plan</strong><br>
+                        □ Entry zone clear<br>
+                        □ Invalidation level defined<br>
+                        □ Rough target or review point<br><br>
+
+                        <strong>6. Final go / no-go</strong><br>
+                        □ Can explain why it is on the list<br>
+                        □ Comfortable if it moves against me<br>
+                        □ All boxes ticked (or consciously waived)
+                    </div>
+                </div>
+
                 <!-- Tool 8 -->
                 <div class="card">
                     <h3>Tool 8 — Risers / Fallers</h3>
@@ -158,16 +194,11 @@ window.Dashboard = {
                     </div>
                 </div>
 
-                <!-- Database Schema -->
-                <div class="card">
+                <!-- Database Schema (live) -->
+                <div class="card" id="schema-card">
                     <h3>Database Schema</h3>
-                    <div class="section" style="font-size:0.85rem; line-height:1.4;">
-                    <strong>index_constituents</strong> — symbol, index_key<br>
-                    <strong>index_quotes</strong> — price, change_pct, volume, avg_volume, name, sector, industry, market_cap, ret_3m, ret_6m, dist_52w_high, above_50ma, pct_from_50ma, above_200ma, pct_from_200ma, vol_20d, sector_rel_1d, sector_rel_5d, …<br>
-                    <strong>daily_closes</strong> — symbol, date, close<br>
-                    <strong>snapshots_5min</strong> — symbol, ts, price, …<br>
-                    <strong>holdings</strong> / <strong>holdings_marks</strong> — positions and daily marks<br>
-                    <strong>app_settings</strong> — key/value (incl. screener_metrics_updated)
+                    <div class="section" id="schema-content" style="font-size:0.85rem; line-height:1.4;">
+                        Loading…
                     </div>
                 </div>
 
@@ -229,78 +260,72 @@ window.Dashboard = {
             </div>
         `;
 
+        // Live schema
+        try {
+            const schemaRes = await fetch("/schema");
+            const schema = await schemaRes.json();
+            const el = document.getElementById("schema-content");
+            if (el && schema.tables) {
+                el.innerHTML = schema.tables.map(t => {
+                    const cols = t.columns.map(c => c.name).join(", ");
+                    return `<strong>${t.table}</strong> (${t.rows} rows) — ${cols}`;
+                }).join("<br>");
+            }
+        } catch (e) {
+            const el = document.getElementById("schema-content");
+            if (el) el.textContent = "Schema unavailable";
+        }
+
         // Notes Edit / Save toggle
         const notesToggle = document.getElementById("notes-toggle");
         const notesDisplay = document.getElementById("notes-display");
         const notesEdit = document.getElementById("notes-edit");
         if (notesToggle && notesDisplay && notesEdit) {
             notesToggle.addEventListener("click", () => {
-                const isEditing = notesEdit.style.display !== "none";
-                if (isEditing) {
-                    // Save
+                const editing = notesEdit.style.display !== "none";
+                if (editing) {
                     const text = notesEdit.value;
                     localStorage.setItem("dashboard_notes", text);
-                    notesDisplay.innerHTML = text.trim()
-                        ? this.escapeHtml(text)
-                        : "<span style='color:#666;'>No notes yet.</span>";
+                    notesDisplay.innerHTML = this.escapeHtml(text) || "<span style='color:#666;'>No notes yet.</span>";
+                    notesDisplay.style.display = "";
                     notesEdit.style.display = "none";
-                    notesDisplay.style.display = "block";
                     notesToggle.textContent = "Edit";
-                    notesToggle.style.background = "#1e5c3a";
                 } else {
-                    // Edit
-                    notesEdit.style.display = "block";
                     notesDisplay.style.display = "none";
-                    notesEdit.focus();
+                    notesEdit.style.display = "";
                     notesToggle.textContent = "Save";
-                    notesToggle.style.background = "#1e3a5c";
+                    notesEdit.focus();
                 }
             });
         }
 
-        // Lightweight style injection if needed
-        if (!document.getElementById("dash-card-style")) {
-            const style = document.createElement("style");
-            style.id = "dash-card-style";
-            style.textContent = `
-                .card { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
-                        border-radius:8px; padding:14px 16px; }
-                .card h3 { margin:0 0 10px 0; color:#7fdbff; font-size:1.05rem; }
-                .section { margin-bottom:10px; font-size:0.9rem; line-height:1.45; }
-                .section ul { margin:4px 0 0 18px; padding:0; }
-                .section li { margin-bottom:3px; }
-            `;
-            document.head.appendChild(style);
-        }
-
-        // Fill Tool 8 counts if status provides them
+        // Fill risers/fallers counts if present
         if (status.risers != null) {
-            const el = document.getElementById("dash-risers");
-            if (el) el.textContent = status.risers;
+            const r = document.getElementById("dash-risers");
+            if (r) r.textContent = status.risers;
         }
         if (status.fallers != null) {
-            const el = document.getElementById("dash-fallers");
-            if (el) el.textContent = status.fallers;
+            const f = document.getElementById("dash-fallers");
+            if (f) f.textContent = status.fallers;
         }
-    },
-
-    escapeHtml(text) {
-        if (!text) return "";
-        const div = document.createElement("div");
-        div.textContent = text;
-        return div.innerHTML.replace(/\n/g, "<br>");
     },
 
     formatDate(iso) {
         if (!iso) return "—";
         try {
             const d = new Date(iso);
-            return d.toLocaleString(undefined, {
-                day: "2-digit", month: "short", year: "numeric",
-                hour: "2-digit", minute: "2-digit"
-            });
+            return d.toLocaleString("en-GB", { timeZone: "Europe/London" });
         } catch {
             return iso;
         }
+    },
+
+    escapeHtml(str) {
+        if (!str) return "";
+        return str
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
     }
 };
