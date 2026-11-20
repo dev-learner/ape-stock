@@ -180,7 +180,7 @@ def init_db():
             ts TEXT NOT NULL,
             type TEXT NOT NULL,
             symbol TEXT,
-            name TEXT,                    -- ← add this line
+            name TEXT,
             quantity REAL,
             price REAL,
             stamp_pct REAL,
@@ -200,6 +200,45 @@ def init_db():
             updated TEXT
         )
     """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS fundamentals_history (
+        symbol TEXT NOT NULL,
+        date TEXT NOT NULL,
+        sector TEXT,
+        industry TEXT,
+        market_cap INTEGER,
+        avg_volume INTEGER,
+        pe_trailing REAL,
+        pe_forward REAL,
+        dividend_yield REAL,
+        shares_outstanding INTEGER,
+        fifty_two_week_high REAL,
+        fifty_two_week_low REAL,
+        beta REAL,
+        book_value REAL,
+        price_to_book REAL,
+        roe REAL,
+        profit_margin REAL,
+        operating_margin REAL,
+        revenue_growth REAL,
+        free_cashflow REAL,
+        current_ratio REAL,
+        ex_dividend_date TEXT,
+        earnings_date TEXT,
+        PRIMARY KEY (symbol, date)
+    )
+""")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS external_constituents (
+            symbol TEXT PRIMARY KEY,
+            name TEXT,
+            market TEXT,
+            price REAL,
+            updated TEXT
+        )
+    """)    
 
     conn.commit()
     conn.close()

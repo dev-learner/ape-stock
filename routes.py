@@ -218,13 +218,7 @@ def status():
 
     # Keep your existing FTSE values (replace the numbers with your live calculation if it differs)
     now = datetime.now(UK)
-    ftse_data = {
-        "current": 10883.51,
-        "is_open": True,
-        "previous": 10673.9,
-        "previous_was_up": True,
-        "server_time": now.isoformat()
-    }
+    ftse_data = fetch_ftse()
 
     last_update_iso = now.isoformat()
 
@@ -380,18 +374,45 @@ def search():
     conn = get_db()
     cur = conn.cursor()
     like = f"%{q}%"
+    upper = q.upper() + "%"
+
+    # FTSE names
     cur.execute("""
-        SELECT symbol, name, price, change_pct
+        SELECT symbol, name, price, change_pct, 'FTSE' AS source
         FROM index_quotes
         WHERE symbol LIKE ? OR name LIKE ?
         ORDER BY 
             CASE WHEN symbol LIKE ? THEN 0 ELSE 1 END,
             symbol
-        LIMIT 30
-    """, (like, like, q.upper() + "%"))
-    rows = [dict(r) for r in cur.fetchall()]
+        LIMIT 20
+    """, (like, like, upper))
+    ftse = [dict(r) for r in cur.fetchall()]
+
+    # External names
+    cur.execute("""
+        SELECT symbol, name, NULL AS price, NULL AS change_pct, market AS source
+        FROM external_constituents
+        WHERE symbol LIKE ? OR name LIKE ?
+        ORDER BY 
+            CASE WHEN symbol LIKE ? THEN 0 ELSE 1 END,
+            symbol
+        LIMIT 15
+    """, (like, like, upper))
+    external = [dict(r) for r in cur.fetchall()]
+
     conn.close()
-    return jsonify(rows)
+
+    # Merge, FTSE first, then external, dedupe by symbol
+    seen = set()
+    results = []
+    for r in ftse + external:
+        if r["symbol"] not in seen:
+            seen.add(r["symbol"])
+            results.append(r)
+        if len(results) >= 30:
+            break
+
+    return jsonify(results)
 
 @bp.route("/schema")
 def schema():
@@ -594,3 +615,31 @@ def rsi(symbol):
         return 100 - (100 / (1 + rs))
 
     return jsonify({"rsi7": round(calc_rsi(closes, 7), 1)})
+
+@bp.route("/fundamentals")
+def fundamentals():
+    """Return latest fundamentals snapshot for Tool 6."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            f.symbol,
+            q.name,
+            f.sector,
+            f.market_cap,
+            f.pe_trailing,
+            f.pe_forward,
+            f.price_to_book,
+            f.dividend_yield,
+            f.roe,
+            f.profit_margin,
+            f.revenue_growth,
+            f.beta,
+            f.current_ratio
+        FROM fundamentals f
+        LEFT JOIN index_quotes q ON q.symbol = f.symbol
+        ORDER BY f.market_cap DESC NULLS LAST
+    """)
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return jsonify({"rows": rows})

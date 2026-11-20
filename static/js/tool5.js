@@ -390,9 +390,21 @@ window.Tool5 = {
         try {
             const res = await fetch("/portfolio/summary");
             const sum = await res.json();
+
+            if (!window.lastPrices) window.lastPrices = {};
+
             sum.positions.forEach(p => {
                 const cell = document.querySelector(`.live-price[data-symbol="${p.symbol}"]`);
-                if (cell) cell.textContent = Number(p.last_price_pence).toFixed(2);
+                if (!cell) return;
+
+                const old = window.lastPrices[p.symbol];
+                const neu = p.last_price_pence;
+                cell.textContent = Number(neu).toFixed(2);
+
+                if (old != null && neu != null && neu !== old) {
+                    triggerFlash(cell, neu > old);
+                }
+                window.lastPrices[p.symbol] = neu;
             });
         } catch (e) {}
     }

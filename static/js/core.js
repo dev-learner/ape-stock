@@ -87,19 +87,21 @@ function makeTableSortable(table, options = {}) {
 
                 let va = getVal(cellA);
                 let vb = getVal(cellB);
-                const na = parseFloat(String(va).replace(/[^0-9.-]/g, ""));
-                const nb = parseFloat(String(vb).replace(/[^0-9.-]/g, ""));
 
-                const aEmpty = isNaN(na) || va === "";
-                const bEmpty = isNaN(nb) || vb === "";
-
-                // Empty values always sort last, regardless of direction
+                const aEmpty = va === "" || va == null;
+                const bEmpty = vb === "" || vb == null;
                 if (aEmpty && bEmpty) return 0;
                 if (aEmpty) return 1;
                 if (bEmpty) return -1;
 
-                if (!isNaN(na) && !isNaN(nb)) return (na - nb) * sortDir;
-                return String(va).localeCompare(String(vb)) * sortDir;
+                // Prefer numeric sort only when both values are clean numbers
+                const na = parseFloat(String(va).replace(/[^0-9.-]/g, ""));
+                const nb = parseFloat(String(vb).replace(/[^0-9.-]/g, ""));
+                const aNum = !isNaN(na) && String(va).match(/^[\d,.-]+$/);
+                const bNum = !isNaN(nb) && String(vb).match(/^[\d,.-]+$/);
+
+                if (aNum && bNum) return (na - nb) * sortDir;
+                return String(va).localeCompare(String(vb), undefined, {numeric: true, sensitivity: "base"}) * sortDir;
             });
 
             // Keep details rows attached to their main row
@@ -231,9 +233,6 @@ function startAutoRefresh() {
     refreshTimer = setInterval(() => {
         if (typeof window.refreshVisible === "function") window.refreshVisible();
     }, duration * 1000);
-    if (window.AppState.currentTool === "4" && window.Tool4 && Tool4.refreshPrices) {
-        Tool4.refreshPrices();
-    }
 }
 
 function nextOpenDescription(nowIso) {
@@ -366,7 +365,6 @@ async function updateCacheStatus() {
 window.refreshVisible = async function () {
     // ---------- Tool 8 ----------
     if (document.getElementById("risers-table") && window.Tool8) {
-        // Re-fetch the full enriched Tool 8 data
         const body = {
             risers_index: window.AppState.currentRisersIndex || "ALL",
             fallers_index: window.AppState.currentFallersIndex || "ALL",
@@ -384,8 +382,18 @@ window.refreshVisible = async function () {
         return;
     }
 
+    // ---------- Tool 4 ----------
+    if (window.AppState.currentTool === "4" && window.Tool4?.refreshPrices) {
+        Tool4.refreshPrices();
+    }
+
+    // ---------- Tool 5 ----------
+    if (window.AppState.currentTool === "5" && window.Tool5?.refreshPrices) {
+        Tool5.refreshPrices();
+    }
+
     // ---------- Tool 7 ----------
-    // To become: 'Rules' where Hit Parametes can be set and adjusted.
+    // To become: 'Rules' where Hit Parameters can be set and adjusted.
 };
 
 // Re-apply a saved sort only if the visual order has actually changed.

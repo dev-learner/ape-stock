@@ -174,6 +174,9 @@ def background_updater():
                     conn.close()
                     write_snapshot(q)
                 time.sleep(1.5)
+
+            update_external_prices()
+
             today = datetime.now(UK).date()
             if today != last_collapse:
                 collapse_old_snapshots()
@@ -228,3 +231,30 @@ def update_holdings_marks():
 
     conn.commit()
     conn.close()
+
+def update_external_prices():
+    """Refresh prices for symbols in external_constituents."""
+    from data import fetch_quote
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT symbol FROM external_constituents")
+    symbols = [r[0] for r in cur.fetchall()]
+    if not symbols:
+        conn.close()
+        return
+
+    print(f"Updating {len(symbols)} external prices...")
+    now = datetime.now(UK).isoformat()
+    for sym in symbols:
+        q = fetch_quote(sym)
+        if q and q.get("price") is not None:
+            cur.execute("""
+                UPDATE external_constituents
+                SET price = ?, updated = ?
+                WHERE symbol = ?
+            """, (q["price"], now, sym))
+        time.sleep(0.2)
+    conn.commit()
+    conn.close()
+    print("External prices updated")
+

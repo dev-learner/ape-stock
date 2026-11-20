@@ -216,10 +216,23 @@ window.Tool4 = {
             const res = await fetch(url);
             const data = await res.json();
             const rows = data.rows || [];
+
+            if (!window.lastPrices) window.lastPrices = {};
+
             rows.forEach(r => {
                 const priceCell = document.querySelector(`.price-cell[data-symbol="${r.symbol}"]`);
                 const dayCell = document.querySelector(`.day-cell[data-symbol="${r.symbol}"]`);
-                if (priceCell) priceCell.textContent = formatNumber(r.price);
+
+                if (priceCell) {
+                    const old = window.lastPrices[r.symbol];
+                    const neu = r.price;
+                    priceCell.textContent = formatNumber(neu);
+                    if (old != null && neu != null && neu !== old) {
+                        triggerFlash(priceCell, neu > old);
+                    }
+                    window.lastPrices[r.symbol] = neu;
+                }
+
                 if (dayCell) {
                     dayCell.textContent = r.change_pct != null ? r.change_pct.toFixed(2) + "%" : "";
                     dayCell.className = `day-cell ${(r.change_pct || 0) >= 0 ? "positive" : "negative"}`;

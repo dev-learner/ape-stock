@@ -1,142 +1,176 @@
 # scripts/update_fundamentals.py
-# DESC: Update dedicated fundamentals table (and key fields in index_quotes) from yfinance
-# RUN: Tool2
-
-"""
-Pulls fundamental data from yfinance and stores it in the dedicated
-fundamentals table. Also keeps market_cap, sector, industry and avg_volume
-in index_quotes so existing screener / rank code continues to work.
-
-On first run it migrates any existing fundamental columns from index_quotes.
-"""
+# DESC: Update fundamentals snapshot and append daily history
+# RUN: Tool2 or automatic via ensure_fundamentals
 
 import sqlite3
 import time
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import yfinance as yf
 import warnings
 warnings.filterwarnings("ignore")
 
 db_path = Path(__file__).parent.parent / "ape_stock.db"
+UK = ZoneInfo("Europe/London")
+
 conn = sqlite3.connect(db_path, timeout=60)
 conn.row_factory = sqlite3.Row
 cur = conn.cursor()
 
-# ---------------------------------------------------------------------------
-# One-time migration of existing data from index_quotes (if columns exist)
-# ---------------------------------------------------------------------------
-def column_exists(table, column):
-    cur.execute(f"PRAGMA table_info({table})")
-    return any(r[1] == column for r in cur.fetchall())
-
-migrate_cols = [
-    "sector", "industry", "market_cap", "avg_volume",
-    "pe_trailing", "pe_forward", "dividend_yield",
-    "shares_outstanding", "fifty_two_week_high", "fifty_two_week_low",
-    "beta", "book_value", "price_to_book",
-    "ex_dividend_date", "earnings_date"
-]
-existing = [c for c in migrate_cols if column_exists("index_quotes", c)]
-
-if existing:
-    print("Migrating existing fundamental data from index_quotes…")
-    cols_sql = ", ".join(existing)
-    cur.execute(f"""
-        INSERT OR IGNORE INTO fundamentals (symbol, {cols_sql})
-        SELECT symbol, {cols_sql}
-        FROM index_quotes
-        WHERE symbol IS NOT NULL
-    """)
-    conn.commit()
-    print(f"Migrated {cur.rowcount} rows")
-
-# ---------------------------------------------------------------------------
-# Update from yfinance
-# ---------------------------------------------------------------------------
-def ts_to_date(ts):
-    if not ts:
-        return None
-    try:
-        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%d")
-    except Exception:
-        return None
+# Ensure history table exists (in case init_db has not run yet)
+cur.execute("""
+    CREATE TABLE IF NOT EXISTS fundamentals_history (
+        symbol TEXT NOT NULL,
+        date TEXT NOT NULL,
+        sector TEXT,
+        industry TEXT,
+        market_cap INTEGER,
+        avg_volume INTEGER,
+        pe_trailing REAL,
+        pe_forward REAL,
+        dividend_yield REAL,
+        shares_outstanding INTEGER,
+        fifty_two_week_high REAL,
+        fifty_two_week_low REAL,
+        beta REAL,
+        book_value REAL,
+        price_to_book REAL,
+        roe REAL,
+        profit_margin REAL,
+        operating_margin REAL,
+        revenue_growth REAL,
+        free_cashflow REAL,
+        current_ratio REAL,
+        ex_dividend_date TEXT,
+        earnings_date TEXT,
+        PRIMARY KEY (symbol, date)
+    )
+""")
+conn.commit()
 
 cur.execute("SELECT symbol FROM index_constituents")
-symbols = [r["symbol"] for r in cur.fetchall()]
-print(f"Updating fundamentals for {len(symbols)} symbols…")
+symbols = [r[0] for r in cur.fetchall()]
+print(f"Updating fundamentals for {len(symbols)} symbols...")
 
-now = datetime.now(timezone.utc).isoformat()
+today = datetime.now(UK).date().isoformat()
 updated = 0
 
-for i, sym in enumerate(symbols, 1):
+for i, symbol in enumerate(symbols, 1):
     try:
-        info = yf.Ticker(sym).info or {}
+        info = yf.Ticker(symbol).info or {}
+
+        def g(key, default=None):
+            v = info.get(key)
+            return v if v is not None else default
 
         data = {
-            "sector": info.get("sector") or info.get("sectorDisp"),
-            "industry": info.get("industry") or info.get("industryDisp"),
-            "market_cap": info.get("marketCap"),
-            "avg_volume": info.get("averageDailyVolume3Month") or info.get("averageDailyVolume10Day"),
-            "pe_trailing": info.get("trailingPE"),
-            "pe_forward": info.get("forwardPE"),
-            "dividend_yield": info.get("dividendYield"),
-            "shares_outstanding": info.get("sharesOutstanding"),
-            "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
-            "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
-            "beta": info.get("beta"),
-            "book_value": info.get("bookValue"),
-            "price_to_book": info.get("priceToBook"),
-            "roe": info.get("returnOnEquity"),
-            "profit_margin": info.get("profitMargins"),
-            "operating_margin": info.get("operatingMargins"),
-            "revenue_growth": info.get("revenueGrowth"),
-            "free_cashflow": info.get("freeCashflow"),
-            "current_ratio": info.get("currentRatio"),
-            "ex_dividend_date": ts_to_date(info.get("exDividendDate")),
-            "earnings_date": ts_to_date(info.get("earningsTimestamp") or info.get("earningsTimestampStart")),
-            "updated": now,
+            "sector": g("sector"),
+            "industry": g("industry"),
+            "market_cap": g("marketCap"),
+            "avg_volume": g("averageVolume"),
+            "pe_trailing": g("trailingPE"),
+            "pe_forward": g("forwardPE"),
+            "dividend_yield": g("dividendYield"),
+            "shares_outstanding": g("sharesOutstanding"),
+            "fifty_two_week_high": g("fiftyTwoWeekHigh"),
+            "fifty_two_week_low": g("fiftyTwoWeekLow"),
+            "beta": g("beta"),
+            "book_value": g("bookValue"),
+            "price_to_book": g("priceToBook"),
+            "roe": g("returnOnEquity"),
+            "profit_margin": g("profitMargins"),
+            "operating_margin": g("operatingMargins"),
+            "revenue_growth": g("revenueGrowth"),
+            "free_cashflow": g("freeCashflow"),
+            "current_ratio": g("currentRatio"),
+            "ex_dividend_date": g("exDividendDate"),
+            "earnings_date": None,  # can be refined later
         }
 
-        # Upsert into fundamentals
-        cols = list(data.keys())
-        placeholders = ", ".join("?" * len(cols))
-        updates = ", ".join(f"{c}=excluded.{c}" for c in cols)
-        cur.execute(f"""
-            INSERT INTO fundamentals (symbol, {", ".join(cols)})
-            VALUES (?, {placeholders})
-            ON CONFLICT(symbol) DO UPDATE SET {updates}
-        """, [sym] + list(data.values()))
-
-        # Keep critical fields in index_quotes for existing code
+        # Upsert current snapshot
         cur.execute("""
-            UPDATE index_quotes
-            SET sector = COALESCE(?, sector),
-                industry = COALESCE(?, industry),
-                market_cap = COALESCE(?, market_cap),
-                avg_volume = COALESCE(?, avg_volume)
-            WHERE symbol = ?
+            INSERT INTO fundamentals (
+                symbol, sector, industry, market_cap, avg_volume,
+                pe_trailing, pe_forward, dividend_yield, shares_outstanding,
+                fifty_two_week_high, fifty_two_week_low, beta, book_value,
+                price_to_book, roe, profit_margin, operating_margin,
+                revenue_growth, free_cashflow, current_ratio,
+                ex_dividend_date, earnings_date, updated
+            ) VALUES (
+                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+            )
+            ON CONFLICT(symbol) DO UPDATE SET
+                sector=excluded.sector,
+                industry=excluded.industry,
+                market_cap=excluded.market_cap,
+                avg_volume=excluded.avg_volume,
+                pe_trailing=excluded.pe_trailing,
+                pe_forward=excluded.pe_forward,
+                dividend_yield=excluded.dividend_yield,
+                shares_outstanding=excluded.shares_outstanding,
+                fifty_two_week_high=excluded.fifty_two_week_high,
+                fifty_two_week_low=excluded.fifty_two_week_low,
+                beta=excluded.beta,
+                book_value=excluded.book_value,
+                price_to_book=excluded.price_to_book,
+                roe=excluded.roe,
+                profit_margin=excluded.profit_margin,
+                operating_margin=excluded.operating_margin,
+                revenue_growth=excluded.revenue_growth,
+                free_cashflow=excluded.free_cashflow,
+                current_ratio=excluded.current_ratio,
+                ex_dividend_date=excluded.ex_dividend_date,
+                earnings_date=excluded.earnings_date,
+                updated=excluded.updated
         """, (
-            data["sector"], data["industry"],
-            data["market_cap"], data["avg_volume"],
-            sym
+            symbol,
+            data["sector"], data["industry"], data["market_cap"], data["avg_volume"],
+            data["pe_trailing"], data["pe_forward"], data["dividend_yield"], data["shares_outstanding"],
+            data["fifty_two_week_high"], data["fifty_two_week_low"], data["beta"], data["book_value"],
+            data["price_to_book"], data["roe"], data["profit_margin"], data["operating_margin"],
+            data["revenue_growth"], data["free_cashflow"], data["current_ratio"],
+            data["ex_dividend_date"], data["earnings_date"],
+            datetime.now(UK).isoformat()
+        ))
+
+        # Append to history (one row per symbol per day)
+        cur.execute("""
+            INSERT OR REPLACE INTO fundamentals_history (
+                symbol, date, sector, industry, market_cap, avg_volume,
+                pe_trailing, pe_forward, dividend_yield, shares_outstanding,
+                fifty_two_week_high, fifty_two_week_low, beta, book_value,
+                price_to_book, roe, profit_margin, operating_margin,
+                revenue_growth, free_cashflow, current_ratio,
+                ex_dividend_date, earnings_date
+            ) VALUES (
+                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+            )
+        """, (
+            symbol, today,
+            data["sector"], data["industry"], data["market_cap"], data["avg_volume"],
+            data["pe_trailing"], data["pe_forward"], data["dividend_yield"], data["shares_outstanding"],
+            data["fifty_two_week_high"], data["fifty_two_week_low"], data["beta"], data["book_value"],
+            data["price_to_book"], data["roe"], data["profit_margin"], data["operating_margin"],
+            data["revenue_growth"], data["free_cashflow"], data["current_ratio"],
+            data["ex_dividend_date"], data["earnings_date"]
         ))
 
         updated += 1
         if i % 25 == 0:
             print(f"  …{i}/{len(symbols)}", flush=True)
             conn.commit()
-        time.sleep(0.3)
+        time.sleep(0.25)
+
     except Exception as e:
-        print(f"  {sym}: {e}")
+        print(f"  {symbol}: {e}")
 
 # Record timestamp
 cur.execute("""
-    INSERT INTO app_settings (key, value)
-    VALUES ('fundamentals_updated', ?)
+    INSERT INTO app_settings (key, value) VALUES ('fundamentals_updated', ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
-""", (now,))
+""", (datetime.now(UK).isoformat(),))
 
 conn.commit()
 conn.close()
-print(f"Done. Updated {updated} symbols.")
+print(f"Done. Updated {updated} symbols. History written for {today}.")
