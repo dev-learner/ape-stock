@@ -122,16 +122,31 @@ def fetch_news(symbol):
         return []
 
 def fetch_ftse():
+    """Return live FTSE 100 status using Yahoo chart history."""
     try:
         r = _session.get(
             "https://query1.finance.yahoo.com/v8/finance/chart/%5EFTSE",
-            params={"range": "5d", "interval": "1d"},
+            params={"range": "10d", "interval": "1d"},
             timeout=10
         )
         r.raise_for_status()
-        meta = r.json()["chart"]["result"][0]["meta"]
-        prev_close = meta.get("chartPreviousClose") or meta.get("previousClose")
-        current = meta.get("regularMarketPrice")
+        result = r.json()["chart"]["result"][0]
+        timestamps = result.get("timestamp", [])
+        closes = result["indicators"]["quote"][0].get("close", [])
+
+        # Build clean list of (date, close)
+        pairs = []
+        for ts, close in zip(timestamps, closes):
+            if close is not None and close == close:  # not NaN
+                d = datetime.fromtimestamp(ts, UK).date()
+                pairs.append((d, float(close)))
+
+        if not pairs:
+            raise ValueError("No valid closes")
+
+        # Most recent close is current (or last close if market closed)
+        current = pairs[-1][1]
+        previous = pairs[-2][1] if len(pairs) > 1 else current
 
         now_uk = datetime.now(UK)
         open_t = now_uk.replace(hour=8, minute=0, second=0, microsecond=0)
@@ -139,18 +154,21 @@ def fetch_ftse():
         is_weekday = now_uk.weekday() < 5
         is_open = is_weekday and open_t <= now_uk < close_t
 
-        state = get_ftse_state()
-        previous_was_up = state["previous_was_up"]
+        # If market is open, prefer the meta regularMarketPrice if available
+        meta = result.get("meta", {})
+        if is_open and meta.get("regularMarketPrice"):
+            current = float(meta["regularMarketPrice"])
 
-        if prev_close is not None and state["previous_close"] != prev_close:
-            if state["previous_close"] is not None and current is not None:
+        state = get_ftse_state()
+        previous_was_up = state.get("previous_was_up")
+
+        if previous is not None and state.get("previous_close") != previous:
+            if state.get("previous_close") is not None and current is not None:
                 previous_was_up = current >= state["previous_close"]
-                save_ftse_state(prev_close, previous_was_up)
-            else:
-                save_ftse_state(prev_close, None)
+            save_ftse_state(previous, previous_was_up)
 
         return {
-            "previous": prev_close,
+            "previous": previous,
             "current": current,
             "is_open": is_open,
             "previous_was_up": bool(previous_was_up) if previous_was_up is not None else None,
@@ -158,7 +176,13 @@ def fetch_ftse():
         }
     except Exception as e:
         print("FTSE fetch error:", e)
-        return {"previous": None, "current": None, "is_open": False, "previous_was_up": None, "server_time": None}
+        return {
+            "previous": None,
+            "current": None,
+            "is_open": False,
+            "previous_was_up": None,
+            "server_time": None
+        }
 
 def _page1_fingerprint(url):
     """Fast fingerprint from the first page only."""
