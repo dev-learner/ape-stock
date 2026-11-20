@@ -17,6 +17,7 @@ def get_db():
 def init_db():
     conn = get_db()
     cur = conn.cursor()
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS index_constituents (
             index_key TEXT,
@@ -24,6 +25,7 @@ def init_db():
             PRIMARY KEY (index_key, symbol)
         )
     """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS index_quotes (
             symbol TEXT PRIMARY KEY,
@@ -36,6 +38,7 @@ def init_db():
             last_update TEXT
         )
     """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS watchlist (
             symbol TEXT PRIMARY KEY,
@@ -46,6 +49,7 @@ def init_db():
             news_checked_at TEXT
         )
     """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS snapshots_5min (
             symbol TEXT,
@@ -57,6 +61,7 @@ def init_db():
             PRIMARY KEY (symbol, ts)
         )
     """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS daily_closes (
             symbol TEXT,
@@ -65,6 +70,7 @@ def init_db():
             PRIMARY KEY (symbol, date)
         )
     """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS ftse_state (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -72,6 +78,7 @@ def init_db():
             previous_was_up INTEGER
         )
     """)
+
     cur.execute("INSERT OR IGNORE INTO ftse_state (id) VALUES (1)")
 
     cur.execute("""
@@ -81,6 +88,7 @@ def init_db():
             updated TEXT
         )
     """)
+
     cur.execute("INSERT OR IGNORE INTO constituents_meta (id) VALUES (1)")
 
     cur.execute("""
@@ -96,6 +104,7 @@ def init_db():
             created TEXT
         )
     """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS holdings_marks (
             holding_id INTEGER,
@@ -106,6 +115,7 @@ def init_db():
             PRIMARY KEY (holding_id, day_offset)
         )
     """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS holdings_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -202,33 +212,44 @@ def init_db():
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS fundamentals_history (
-        symbol TEXT NOT NULL,
-        date TEXT NOT NULL,
-        sector TEXT,
-        industry TEXT,
-        market_cap INTEGER,
-        avg_volume INTEGER,
-        pe_trailing REAL,
-        pe_forward REAL,
-        dividend_yield REAL,
-        shares_outstanding INTEGER,
-        fifty_two_week_high REAL,
-        fifty_two_week_low REAL,
-        beta REAL,
-        book_value REAL,
-        price_to_book REAL,
-        roe REAL,
-        profit_margin REAL,
-        operating_margin REAL,
-        revenue_growth REAL,
-        free_cashflow REAL,
-        current_ratio REAL,
-        ex_dividend_date TEXT,
-        earnings_date TEXT,
-        PRIMARY KEY (symbol, date)
-    )
-""")
+        CREATE TABLE IF NOT EXISTS fundamentals_history (
+            symbol TEXT NOT NULL,
+            date TEXT NOT NULL,
+            sector TEXT,
+            industry TEXT,
+            market_cap INTEGER,
+            avg_volume INTEGER,
+            pe_trailing REAL,
+            pe_forward REAL,
+            dividend_yield REAL,
+            shares_outstanding INTEGER,
+            fifty_two_week_high REAL,
+            fifty_two_week_low REAL,
+            beta REAL,
+            book_value REAL,
+            price_to_book REAL,
+            roe REAL,
+            profit_margin REAL,
+            operating_margin REAL,
+            revenue_growth REAL,
+            free_cashflow REAL,
+            current_ratio REAL,
+            ex_dividend_date TEXT,
+            earnings_date TEXT,
+            PRIMARY KEY (symbol, date)
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bugettes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            description TEXT NOT NULL,
+            expected TEXT,
+            tool TEXT,
+            status TEXT DEFAULT 'open',
+            created TEXT
+        )
+    """)
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS external_constituents (
@@ -239,6 +260,12 @@ def init_db():
             updated TEXT
         )
     """)    
+
+    # Safe migration for databases created before the price column existed
+    cur.execute("PRAGMA table_info(external_constituents)")
+    cols = [row[1] for row in cur.fetchall()]
+    if "price" not in cols:
+        cur.execute("ALTER TABLE external_constituents ADD COLUMN price REAL")
 
     conn.commit()
     conn.close()

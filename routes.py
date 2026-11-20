@@ -70,62 +70,22 @@ def settings_save():
             val = float(target)
             val = max(1, min(10, val))
             set_setting("tracker_close_target", val)
-        except (ValueError, TypeError):
+        except (TypeError, ValueError):
             pass
 
-    # Ranking settings
-    for key, default in (
-        ("rank_window", 35),
-        ("rank_presence", 50),
-        ("rank_cutoff", 12),
-    ):
-        if key in data and data[key] is not None:
-            try:
-                val = int(float(data[key]))
-                set_setting(key, val)
-            except (ValueError, TypeError):
-                set_setting(key, default)
-
-    # Candidate selection settings
-    for key, default in (
-        ("cand_rank", 12),
-        ("cand_vs50_buy", 0.0),
-        ("cand_vs200_buy", 0.0),
-        ("cand_vs50_hold", 0.0),
-        ("cand_vs50_sell", 0.0),
-    ):
-        if key in data and data[key] is not None:
-            try:
-                val = float(data[key]) if "vs" in key else int(float(data[key]))
-                set_setting(key, val)
-            except (ValueError, TypeError):
-                set_setting(key, default)
-
-    if "cand_require_faller" in data and data["cand_require_faller"] is not None:
-        set_setting("cand_require_faller", "1" if str(data["cand_require_faller"]) in ("1", "true", "True") else "0")
-
-
-    # Valuation filter settings
-    for key, default in (
-        ("pe_min", 5.0),
-        ("pe_max", 40.0),
-        ("pb_max", 4.0),
-    ):
-        if key in data and data[key] is not None:
-            try:
-                val = float(data[key])
-                set_setting(key, val)
-            except (ValueError, TypeError):
-                set_setting(key, default)
-
-    if "require_dividend" in data and data["require_dividend"] is not None:
-        set_setting("require_dividend", "1" if str(data["require_dividend"]) in ("1", "true", "True") else "0")
-
-    if "use_valuation" in data and data["use_valuation"] is not None:
+    # Valuation toggle
+    if "use_valuation" in data:
         set_setting("use_valuation", "1" if str(data["use_valuation"]) in ("1", "true", "True") else "0")
 
     # All other settings stored as strings
-    for key in ("listLimit", "riserPct", "fallerPct", "hitThreshold", "notional", "stampPct"):
+    for key in (
+        "listLimit", "riserPct", "fallerPct", "hitThreshold", "notional", "stampPct",
+        "rsiOversold", "rsiOverbought", "rsiLength",
+        "rank_window", "rank_presence", "rank_cutoff",
+        "pe_min", "pe_max", "pb_max", "require_dividend",
+        "cand_rank", "cand_require_faller",
+        "cand_vs50_buy", "cand_vs200_buy", "cand_vs50_hold", "cand_vs50_sell"
+    ):
         if key in data and data[key] is not None:
             set_setting(key, str(data[key]))
 
@@ -148,14 +108,17 @@ def settings_get():
         "pe_min": get_setting("pe_min", "5"),
         "pe_max": get_setting("pe_max", "40"),
         "pb_max": get_setting("pb_max", "4"),
-        "require_dividend": get_setting("require_dividend", "1"),
+        "require_dividend": get_setting("require_dividend", "0"),
         "use_valuation": get_setting("use_valuation", "0"),
         "cand_rank": get_setting("cand_rank", "12"),
         "cand_require_faller": get_setting("cand_require_faller", "1"),
         "cand_vs50_buy": get_setting("cand_vs50_buy", "0"),
         "cand_vs200_buy": get_setting("cand_vs200_buy", "0"),
         "cand_vs50_hold": get_setting("cand_vs50_hold", "0"),
-        "cand_vs50_sell": get_setting("cand_vs50_sell", "0"),        
+        "cand_vs50_sell": get_setting("cand_vs50_sell", "0"),
+        "rsiOversold": get_setting("rsiOversold", "30"),
+        "rsiOverbought": get_setting("rsiOverbought", "70"),
+        "rsiLength": get_setting("rsiLength", "7"),
     })
 
 @bp.route("/status")
@@ -643,3 +606,74 @@ def fundamentals():
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return jsonify({"rows": rows})
+
+@bp.route("/admin/bugs", methods=["GET", "POST"])
+def bugs():
+    conn = get_db()
+    cur = conn.cursor()
+    if request.method == "POST":
+        data = request.get_json() or {}
+        cur.execute("""
+            INSERT INTO bugettes (description, expected, tool, created)
+            VALUES (?, ?, ?, ?)
+        """, (
+            data.get("description", "").strip(),
+            data.get("expected", "").strip(),
+            data.get("tool", "").strip(),
+            datetime.now(UK).isoformat()
+        ))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+
+    cur.execute("SELECT * FROM bugettes WHERE status = 'open' ORDER BY id")
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+
+@bp.route("/admin/bugs/prompt")
+def bug_prompt():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM bugettes WHERE status = 'open' ORDER BY id")
+    bugs = cur.fetchall()
+    conn.close()
+
+    if not bugs:
+        prompt = "No open bugs."
+    else:
+        prompt = "The following errors have been reported:\n\n"
+        for b in bugs:
+            prompt += f"- Tool: {b['tool'] or '—'}\n"
+            prompt += f"  Description: {b['description']}\n"
+            prompt += f"  Expected: {b['expected'] or '—'}\n\n"
+        prompt += """1 - Use the latest files from ape-stock's repo. (https://github.com/dev-learner/ape-stock)
+2 - IMPORTANT - For any file that is edited:
+a) - If the edit is 'minor' return the complete function.
+b) - If the edit is more than 'minor' return the complete file.
+3 - Confirm your understanding of the 'issues'
+4 - Any initial questions before coding- Please ask."""
+
+    return jsonify({"prompt": prompt})
+
+
+@bp.route("/admin/bugs/signoff", methods=["POST"])
+def bug_signoff():
+    data = request.get_json() or {}
+    ids = data.get("ids", [])
+    if not ids:
+        return jsonify({"ok": True})
+
+    conn = get_db()
+    cur = conn.cursor()
+    placeholders = ",".join("?" * len(ids))
+    cur.execute(f"""
+        UPDATE bugettes
+        SET status = 'closed'
+        WHERE id IN ({placeholders})
+    """, ids)
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
