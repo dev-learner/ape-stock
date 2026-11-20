@@ -46,7 +46,6 @@ window.Tool4 = {
                 <h2>${title}</h2>
                 <div>
                     <button id="rank-toggle" class="mini-btn" style="margin-right:8px; background:#1e3a5c;">${toggleLabel}</button>
-                    <button id="show-candidates" class="mini-btn" style="margin-right:8px; background:#5c3a1e;">Show Candidates</button>
                     <button id="add-to-tracker" class="mini-btn" style="background:#1e5c3a;">Add selected to Tracker</button>
                 </div>
             </div>
@@ -67,7 +66,6 @@ window.Tool4 = {
                         <th data-key="vol_20d" title="20-day realised volatility">Vol 20d</th>
                         <th data-key="sector_rel_1d" title="1-day return relative to sector">Sec 1d</th>
                         <th data-key="sector_rel_5d" title="5-day return relative to sector">Sec 5d</th>
-                        <th title="Candidate signal">Signal</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -93,7 +91,6 @@ window.Tool4 = {
                             <td>${r.vol_20d != null ? r.vol_20d.toFixed(1) : ""}</td>
                             <td class="${(r.sector_rel_1d || 0) >= 0 ? "positive" : "negative"}">${r.sector_rel_1d != null ? r.sector_rel_1d.toFixed(1) : ""}</td>
                             <td class="${(r.sector_rel_5d || 0) >= 0 ? "positive" : "negative"}">${r.sector_rel_5d != null ? r.sector_rel_5d.toFixed(1) : ""}</td>
-                            <td class="signal-cell"></td>
                             <td><input type="checkbox" data-symbol="${r.symbol}"></td>
                         </tr>`;
                     }).join("")}
@@ -104,50 +101,6 @@ window.Tool4 = {
         document.getElementById("rank-toggle")?.addEventListener("click", () => {
             this.fullRank = !this.fullRank;
             this.show();
-        });
-
-        document.getElementById("show-candidates")?.addEventListener("click", () => {
-            const btn = document.getElementById("show-candidates");
-            const isActive = btn.dataset.active === "true";
-            const table = document.getElementById("screener-table");
-            const trs = [...table.querySelectorAll("tbody tr")];
-
-            // Read candidate settings (defaults match previous hard-coded rules)
-            const rankCutoff = parseInt(localStorage.getItem("cand_rank") || "12", 10);
-            const requireFaller = (localStorage.getItem("cand_require_faller") || "1") === "1";
-            const vs50Buy = parseFloat(localStorage.getItem("cand_vs50_buy") || "0");
-            const vs200Buy = parseFloat(localStorage.getItem("cand_vs200_buy") || "0");
-            const vs50Hold = parseFloat(localStorage.getItem("cand_vs50_hold") || "0");
-            const vs50Sell = parseFloat(localStorage.getItem("cand_vs50_sell") || "0");
-
-            trs.forEach(tr => {
-                const cells = tr.children;
-                const rankText = cells[3].textContent.trim();
-                const rank = rankText === "" ? NaN : parseInt(rankText, 10);
-                const vs50 = parseFloat(cells[9].textContent);
-                const vs200 = parseFloat(cells[10].textContent);
-                const isFaller = cells[0].textContent.includes("🔴");
-
-                let signal = "";
-                if (!isNaN(rank) && rank <= rankCutoff &&
-                    (!requireFaller || isFaller) &&
-                    vs50 > vs50Buy && vs200 > vs200Buy) {
-                    signal = "🟢 Buy";
-                } else if (!isNaN(rank) && rank <= rankCutoff && vs50 >= vs50Hold) {
-                    signal = "🟡 Hold";
-                } else if (!isNaN(vs50) && vs50 < vs50Sell) {
-                    signal = "🔴 Sell";
-                }
-
-                const sigCell = tr.querySelector(".signal-cell");
-                if (sigCell) sigCell.textContent = isActive ? "" : signal;
-
-                const keep = isActive || signal === "🟢 Buy" || signal === "🟡 Hold";
-                tr.style.display = keep ? "" : "none";
-            });
-
-            btn.dataset.active = isActive ? "false" : "true";
-            btn.textContent = isActive ? "Show Candidates" : "Show All";
         });
 
         document.getElementById("add-to-tracker")?.addEventListener("click", async () => {

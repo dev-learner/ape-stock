@@ -84,7 +84,8 @@ def settings_save():
         "rank_window", "rank_presence", "rank_cutoff",
         "pe_min", "pe_max", "pb_max", "require_dividend",
         "cand_rank", "cand_require_faller",
-        "cand_vs50_buy", "cand_vs200_buy", "cand_vs50_hold", "cand_vs50_sell"
+        "cand_vs50_buy", "cand_vs200_buy", "cand_vs50_hold", "cand_vs50_sell",
+        "cand_rank_max", "cand_pe_min", "cand_pe_max", "cand_pb_max", "cand_require_div"
     ):
         if key in data and data[key] is not None:
             set_setting(key, str(data[key]))
@@ -119,6 +120,11 @@ def settings_get():
         "rsiOversold": get_setting("rsiOversold", "30"),
         "rsiOverbought": get_setting("rsiOverbought", "70"),
         "rsiLength": get_setting("rsiLength", "7"),
+        "cand_rank_max": get_setting("cand_rank_max", "12"),
+        "cand_pe_min": get_setting("cand_pe_min", "5"),
+        "cand_pe_max": get_setting("cand_pe_max", "40"),
+        "cand_pb_max": get_setting("cand_pb_max", "4"),
+        "cand_require_div": get_setting("cand_require_div", "0"),        
     })
 
 @bp.route("/status")

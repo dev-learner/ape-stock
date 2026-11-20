@@ -364,7 +364,7 @@ async function updateCacheStatus() {
 
 window.refreshVisible = async function () {
     // ---------- Tool 8 ----------
-    if (document.getElementById("risers-table") && window.Tool8) {
+    if (document.getElementById("risers-table") && window.Tool8 && window.AppState.currentTool === "8") {
         const body = {
             risers_index: window.AppState.currentRisersIndex || "ALL",
             fallers_index: window.AppState.currentFallersIndex || "ALL",
@@ -379,7 +379,6 @@ window.refreshVisible = async function () {
         if (window.Tool8 && data.result) {
             window.Tool8.render(data.result);
         }
-        return;
     }
 
     // ---------- Tool 4 ----------
@@ -393,7 +392,9 @@ window.refreshVisible = async function () {
     }
 
     // ---------- Tool 7 ----------
-    // To become: 'Rules' where Hit Parameters can be set and adjusted.
+    if (window.AppState.currentTool === "7" && window.Tool7?.refreshPrices) {
+        Tool7.refreshPrices();
+    }
 };
 
 // Re-apply a saved sort only if the visual order has actually changed.

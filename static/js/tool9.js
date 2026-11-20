@@ -90,6 +90,26 @@ window.Tool9 = {
                 <label for="candVs50Sell">vs 50MA max for Sell</label>
                 <input type="number" id="candVs50Sell" min="-50" max="50" step="0.1" value="0">
 
+                <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">Candidates (Tool 7)</h2>
+
+                <label for="candRankMax">Rank cut-off (max)</label>
+                <input type="number" id="candRankMax" min="1" max="100" step="1" value="12">
+
+                <label for="candPeMin">Trailing PE min</label>
+                <input type="number" id="candPeMin" min="0" max="100" step="0.5" value="5">
+
+                <label for="candPeMax">Trailing PE max</label>
+                <input type="number" id="candPeMax" min="0" max="200" step="0.5" value="40">
+
+                <label for="candPbMax">Price / Book max</label>
+                <input type="number" id="candPbMax" min="0" max="20" step="0.1" value="4">
+
+                <label for="candRequireDiv">Require positive dividend yield</label>
+                <select id="candRequireDiv">
+                    <option value="0">No</option>
+                    <option value="1">Yes</option>
+                </select>
+
                 <h2 style="margin:28px 0 12px; color:#7fdbff; font-size:1.15rem;">RSI Settings</h2>
 
                 <label for="rsiOversold">Oversold Below</label>
@@ -146,6 +166,11 @@ window.Tool9 = {
             set("candVs200Buy", "cand_vs200_buy");
             set("candVs50Hold", "cand_vs50_hold");
             set("candVs50Sell", "cand_vs50_sell");
+            set("candRankMax", "cand_rank_max");
+            set("candPeMin", "cand_pe_min");
+            set("candPeMax", "cand_pe_max");
+            set("candPbMax", "cand_pb_max");
+            set("candRequireDiv", "cand_require_div");
 
             if (s.use_valuation != null) {
                 document.getElementById("useValuation").checked = (s.use_valuation === "1");
@@ -175,6 +200,11 @@ window.Tool9 = {
             if (s.cand_vs200_buy) localStorage.setItem("cand_vs200_buy", s.cand_vs200_buy);
             if (s.cand_vs50_hold) localStorage.setItem("cand_vs50_hold", s.cand_vs50_hold);
             if (s.cand_vs50_sell) localStorage.setItem("cand_vs50_sell", s.cand_vs50_sell);
+            if (s.cand_rank_max) localStorage.setItem("cand_rank_max", s.cand_rank_max);
+            if (s.cand_pe_min) localStorage.setItem("cand_pe_min", s.cand_pe_min);
+            if (s.cand_pe_max) localStorage.setItem("cand_pe_max", s.cand_pe_max);
+            if (s.cand_pb_max) localStorage.setItem("cand_pb_max", s.cand_pb_max);
+            if (s.cand_require_div) localStorage.setItem("cand_require_div", s.cand_require_div);
         } catch (e) {
             console.warn("Could not load settings", e);
         }
@@ -205,7 +235,12 @@ window.Tool9 = {
             cand_vs50_buy: document.getElementById("candVs50Buy").value,
             cand_vs200_buy: document.getElementById("candVs200Buy").value,
             cand_vs50_hold: document.getElementById("candVs50Hold").value,
-            cand_vs50_sell: document.getElementById("candVs50Sell").value
+            cand_vs50_sell: document.getElementById("candVs50Sell").value,
+            cand_rank_max: document.getElementById("candRankMax").value,
+            cand_pe_min: document.getElementById("candPeMin").value,
+            cand_pe_max: document.getElementById("candPeMax").value,
+            cand_pb_max: document.getElementById("candPbMax").value,
+            cand_require_div: document.getElementById("candRequireDiv").value
         };
 
         try {

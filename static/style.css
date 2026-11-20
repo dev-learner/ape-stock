@@ -565,3 +565,33 @@ canvas.spark {
     text-align: left; 
     width: auto;
 }  /* Notes */
+
+/* Candidates table alignment */
+#candidates-table th,
+#candidates-table td {
+    text-align: left;
+    padding: 6px 10px;
+}
+#candidates-table th:nth-child(4),
+#candidates-table td:nth-child(4),
+#candidates-table th:nth-child(5),
+#candidates-table td:nth-child(5),
+#candidates-table th:nth-child(6),
+#candidates-table td:nth-child(6),
+#candidates-table th:nth-child(7),
+#candidates-table td:nth-child(7),
+#candidates-table th:nth-child(8),
+#candidates-table td:nth-child(8),
+#candidates-table th:nth-child(9),
+#candidates-table td:nth-child(9),
+#candidates-table th:nth-child(10),
+#candidates-table td:nth-child(10),
+#candidates-table th:nth-child(11),
+#candidates-table td:nth-child(11) {
+    text-align: right;
+}
+#candidates-table th:last-child,
+#candidates-table td:last-child {
+    text-align: center;
+    width: 40px;
+}

@@ -2,58 +2,142 @@
 window.Tool7 = {
     async show() {
         const container = document.getElementById("results");
+        container.innerHTML = `<div style="padding:12px; color:#aaa;">Loading candidates…</div>`;
+
+        try {
+            const [screenerRes, fundRes, settingsRes] = await Promise.all([
+                fetch("/screener").then(r => r.json()),
+                fetch("/fundamentals").then(r => r.json()),
+                fetch("/settings/get").then(r => r.json())
+            ]);
+
+            const screener = screenerRes.rows || [];
+            const fundamentals = fundRes.rows || fundRes || [];
+            const s = settingsRes || {};
+
+            const rankMax = parseInt(s.cand_rank_max || "12", 10);
+            const peMin = parseFloat(s.cand_pe_min || "5");
+            const peMax = parseFloat(s.cand_pe_max || "40");
+            const pbMax = parseFloat(s.cand_pb_max || "4");
+            const requireDiv = (s.cand_require_div === "1");
+
+            const fundMap = {};
+            fundamentals.forEach(f => { fundMap[f.symbol] = f; });
+
+            const candidates = screener
+                .filter(r => {
+                    const rank = parseInt(r.rank, 10);
+                    if (isNaN(rank) || rank > rankMax) return false;
+
+                    const f = fundMap[r.symbol] || {};
+                    const pe = parseFloat(f.pe_trailing);
+                    const pb = parseFloat(f.price_to_book);
+                    const div = parseFloat(f.dividend_yield);
+
+                    if (!isNaN(pe) && (pe < peMin || pe > peMax)) return false;
+                    if (!isNaN(pb) && pb >= pbMax) return false;
+                    if (requireDiv && (isNaN(div) || div <= 0)) return false;
+
+                    return true;
+                })
+                .sort((a, b) => (parseInt(a.rank) || 999) - (parseInt(b.rank) || 999));
+
+            this.render(container, candidates, fundMap, rankMax, peMin, peMax, pbMax, requireDiv);
+        } catch (e) {
+            container.innerHTML = `<div style="padding:12px; color:#f87171;">Failed to load candidates.</div>`;
+        }
+    },
+
+    render(container, rows, fundMap, rankMax, peMin, peMax, pbMax, requireDiv) {
+        const body = rows.map(r => {
+            const f = fundMap[r.symbol] || {};
+            return `
+                <tr>
+                    <td>${r.symbol}</td>
+                    <td>${r.name || ""}</td>
+                    <td>${r.sector || ""}</td>
+                    <td title="Persistence rank: how often this name has been in the top tier over the ranking window. Lower is better (1 = most persistent).">${r.rank ?? ""}</td>
+                    <td title="Latest price (pence).">${r.price != null ? Number(r.price).toFixed(2) : ""}</td>
+                    <td title="Today’s percentage price change. Shows immediate momentum or weakness on the current session.">${r.change_pct != null ? r.change_pct.toFixed(2) + "%" : ""}</td>
+                    <td title="3-month price return. Positive values show medium-term upward momentum.">${r.ret_3m != null ? r.ret_3m.toFixed(1) + "%" : ""}</td>
+                    <td title="Percentage distance from the 50-day moving average. Positive = trading above the 50-day MA (short-term trend support).">${r.pct_from_50ma != null ? r.pct_from_50ma.toFixed(1) : ""}</td>
+                    <td title="Percentage distance from the 200-day moving average. Positive = trading above the 200-day MA (longer-term trend support).">${r.pct_from_200ma != null ? r.pct_from_200ma.toFixed(1) : ""}</td>
+                    <td title="Trailing Price/Earnings ratio. Lower values (within the gate) suggest the name is not extremely expensive on recent earnings.">${f.pe_trailing != null ? Number(f.pe_trailing).toFixed(1) : ""}</td>
+                    <td title="Price-to-Book ratio. Values under the gate indicate the market is not pricing the company at a large premium to its book value.">${f.price_to_book != null ? Number(f.price_to_book).toFixed(2) : ""}</td>
+                    <td><input type="checkbox" class="cand-select" data-symbol="${r.symbol}"></td>
+                </tr>`;
+        }).join("");
+
         container.innerHTML = `
-            <div class="region-bar">
-                <h3>Rules</h3>
-                <div class="right-controls">
-                    <span style="font-size:0.85rem; color:var(--accent);">Hard-coded values (will become editable)</span>
-                </div>
+            <h2>Candidates</h2>
+            <p style="color:#aaa; margin-top:0;">Rank ≤ ${rankMax} and fundamental gates (PE ${peMin}–${peMax}, P/B &lt; ${pbMax}${requireDiv ? ", dividend required" : ""}). Sorted best → worst.</p>
+            <div style="margin:12px 0;">
+                <button id="cand-add" class="mini-btn" style="background:#1e5c3a;">Add selected to Tracker</button>
             </div>
-            <div style="padding:16px 8px; max-width:720px;">
-                <p style="color:#aaa; margin-top:0;">
-                    These are the values currently baked into the code. 
-                    They will be moved here so the Screener, Hit score and Tracker can read them from one place.
-                </p>
-
-                <h4 style="margin:20px 0 8px; color:#7fdbff;">Hit / Faller rules</h4>
-                <table class="data-table" style="width:100%;">
-                    <thead><tr><th>Parameter</th><th>Current value</th><th>Used for</th></tr></thead>
-                    <tbody>
-                        <tr><td>Min |change %|</td><td>5</td><td>Hit point</td></tr>
-                        <tr><td>£ impact threshold</td><td>20,000,000</td><td>Hit point</td></tr>
-                        <tr><td>Volume ratio</td><td>1.5</td><td>Hit point</td></tr>
-                        <tr><td>RSI(7) oversold</td><td>≤ 30</td><td>Hit point (fallers)</td></tr>
-                        <tr><td>Hit % required</td><td>50</td><td>Qualification</td></tr>
-                    </tbody>
-                </table>
-
-                <h4 style="margin:24px 0 8px; color:#7fdbff;">Tracker</h4>
-                <table class="data-table" style="width:100%;">
-                    <thead><tr><th>Parameter</th><th>Current value</th><th>Used for</th></tr></thead>
-                    <tbody>
-                        <tr><td>Close target</td><td>3 %</td><td>Auto-sell</td></tr>
-                        <tr><td>Stamp duty</td><td>0.5 %</td><td>Net £ calc</td></tr>
-                        <tr><td>Default notional</td><td>£500</td><td>New positions</td></tr>
-                    </tbody>
-                </table>
-
-                <h4 style="margin:24px 0 8px; color:#7fdbff;">Screener / Safe-bet (planned)</h4>
-                <table class="data-table" style="width:100%;">
-                    <thead><tr><th>Parameter</th><th>Proposed default</th><th>Notes</th></tr></thead>
-                    <tbody>
-                        <tr><td>Min market cap / index</td><td>FTSE 100 preferred</td><td>Size / liquidity floor</td></tr>
-                        <tr><td>Trend filter</td><td>Above 50-day &amp; 200-day MA</td><td>Avoid multi-month downtrends</td></tr>
-                        <tr><td>3-month return floor</td><td>&gt; –15 %</td><td>Not in free-fall</td></tr>
-                        <tr><td>Avg volume floor</td><td>Adequate for size</td><td>Practical fills</td></tr>
-                        <tr><td>Max distance from 52w high</td><td>Optional</td><td>Leadership filter</td></tr>
-                    </tbody>
-                </table>
-
-                <p style="margin-top:24px; color:#888; font-size:0.9rem;">
-                    Next step: turn the tables above into editable inputs that write to <code>app_settings</code> 
-                    (or a dedicated rules table). Screener and Hit logic will then read from there instead of constants.
-                </p>
-            </div>
+            <table id="candidates-table" class="data-table">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Name</th>
+                        <th>Sector</th>
+                        <th title="Persistence rank: how often this name has been in the top tier over the ranking window. Lower is better (1 = most persistent).">Rank</th>
+                        <th title="Latest price (pence).">Price</th>
+                        <th title="Today’s percentage price change. Shows immediate momentum or weakness on the current session.">Day %</th>
+                        <th title="3-month price return. Positive values show medium-term upward momentum.">3 m %</th>
+                        <th title="Percentage distance from the 50-day moving average. Positive = trading above the 50-day MA (short-term trend support).">vs 50</th>
+                        <th title="Percentage distance from the 200-day moving average. Positive = trading above the 200-day MA (longer-term trend support).">vs 200</th>
+                        <th title="Trailing Price/Earnings ratio. Lower values (within the gate) suggest the name is not extremely expensive on recent earnings.">PE</th>
+                        <th title="Price-to-Book ratio. Values under the gate indicate the market is not pricing the company at a large premium to its book value.">P/B</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>${body || `<tr><td colspan="12" style="text-align:center; color:#666;">No candidates match the current gates.</td></tr>`}</tbody>
+            </table>
         `;
+
+        document.getElementById("cand-add").onclick = () => {
+            const selected = [...document.querySelectorAll(".cand-select:checked")].map(cb => cb.dataset.symbol);
+            if (!selected.length) return;
+            if (window.Tool3 && typeof window.Tool3.addSymbols === "function") {
+                window.Tool3.addSymbols(selected);
+            } else {
+                alert("Selected: " + selected.join(", ") + "\n(Tracker add not wired yet)");
+            }
+        };
+
+        if (window.makeTableSortable) {
+            makeTableSortable(document.getElementById("candidates-table"));
+        }
+    },
+
+    async refreshPrices() {
+        if (window.AppState.currentTool !== "7") return;
+        try {
+            const res = await fetch("/screener");
+            const data = await res.json();
+            const map = {};
+            (data.rows || []).forEach(r => { map[r.symbol] = r; });
+
+            document.querySelectorAll("#candidates-table tbody tr").forEach(tr => {
+                const sym = tr.children[0].textContent.trim();
+                const row = map[sym];
+                if (!row) return;
+
+                const priceCell = tr.children[4];
+                const dayCell = tr.children[5];
+
+                if (priceCell && row.price != null) {
+                    const old = parseFloat(priceCell.textContent);
+                    const neu = Number(row.price);
+                    priceCell.textContent = neu.toFixed(2);
+                    if (!isNaN(old) && old !== neu && window.triggerFlash) {
+                        window.triggerFlash(priceCell, neu > old);
+                    }
+                }
+                if (dayCell && row.change_pct != null) {
+                    dayCell.textContent = row.change_pct.toFixed(2) + "%";
+                }
+            });
+        } catch (e) { /* silent */ }
     }
 };
