@@ -218,46 +218,18 @@ window.Dashboard = {
                     </div>
                 </div>
 
-                <!-- Considerations -->
+                <!-- Open Items -->
                 <div class="card" style="grid-column:1 / -1;">
-                    <h3>Considerations</h3>
+                    <h3>Open Items</h3>
                     <div class="section">
-                    <strong>Filters & Scoring</strong>
-                    <ul>
-                        <li>Persistence ranking (top-N days) as live filter or score — strong edge in back-tests</li>
-                        <li>Walk-forward ranking (no look-ahead) for realistic testing</li>
-                        <li>Acceleration flag (3 m vs 6 m, optionally 1 m / 1 y)</li>
-                        <li>Sector-relative strength deeper integration</li>
-                        <li>Editable weights / thresholds in Tool 7 feeding both Screener and Hit</li>
-                    </ul>
-                    <strong>News, RNS & Alerts</strong>
-                    <ul>
-                        <li>News / RNS presence or negative-keyword flag on Screener and Tool 8</li>
-                        <li>Alert system for open positions: price drop, MA loss, new RNS, rank drop, sector deterioration</li>
-                        <li>Back-test impact of skipping entries with recent news</li>
-                    </ul>
-                    <strong>Data & Fundamentals</strong>
-                    <ul>
-                        <li>Deeper sector / industry analysis and relative performance</li>
-                        <li>Expandable fundamentals row in Tool 3 (PE, yield, etc.)</li>
-                        <li>Earnings-date proximity, ex-div awareness</li>
-                    </ul>
-                    <strong>UI & Workflow</strong>
-                    <ul>
-                        <li>Glossary / “How to read” / Help page</li>
-                        <li>Drag-and-drop reordering in Tracker</li>
-                        <li>Test-mode toggle (simulated data when market closed)</li>
-                        <li>“Also down today” filter on Screener</li>
-                        <li>Badge in Tool 8 for current Screener names</li>
-                    </ul>
-                    <strong>Process</strong>
-                    <ul>
-                        <li>User still learning — emphasis on analysis and monitoring over pure mechanical dip-buying</li>
-                        <li>Discretionary exits expected to be earlier than fixed back-test stops</li>
-                    </ul>
+                        <ul>
+                            <li>News / RNS presence or negative-keyword flag on screener and risers/fallers</li>
+                            <li>Simple alerts for open positions (price drop, rank drop, MA loss)</li>
+                            <li>Optional acceleration cue (3 m vs 6 m) on the technical screener</li>
+                            <li>Walk-forward version of the persistence ranking for more realistic testing</li>
+                        </ul>
                     </div>
                 </div>
-
             </div>
         `;
 
