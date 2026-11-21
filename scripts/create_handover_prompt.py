@@ -29,7 +29,7 @@ Key entry points (raw links):
 - {RAW_BASE}/templates/index.html
 - {RAW_BASE}/templates/settings.html
 
-To gain a complete understanding of ape-stock, its goals and its components (tools 1-10) study the Dashboard page and the repository structure.
+To gain a complete understanding of ape-stock examine the Dashboard page, the repository structure and the code within each file.
 
 Keep the UK-only focus: FTSE 100 & FTSE 250.
 
@@ -37,18 +37,17 @@ Use small modular changes (shared-core philosophy).
 
 Remove redundant code.
 
-IMPORTANT - If you edit a file:
-1. Always make sure code is fully documented.
-2. If there is a 'minor' change in part of a function, or block of code, return the complete function (or block of code).
-3. If the edit is more than 'minor' return the complete file.
+IMPORTANT!:
+1. Always make sure code is fully commented.
+2. If an edit is 'minor' return the complete function.
+3. If an edit is more than 'minor' return the complete file.
 4. NEVER return snippets of code.
 
-Continue from this exact state.
-
-Before anything else:
+Continue from this exact state and before anything else:
 1. Confirm your understanding of ape-stock.
-2. Where we are in the development cycle (what are we currently working on?).
+2. Where we are in the development cycle (what are we currently working on and what's next?).
 3. Any initial questions - Please ask.
+4. Welcome to the ape-stock dev team! 😘
 """
 
 OUT.write_text(prompt, encoding="utf-8")
