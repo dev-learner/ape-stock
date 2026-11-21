@@ -1,11 +1,12 @@
 # scripts/create_handover_prompt.py
-# DESC: Generate a compact handover-prompt.txt that points at the public GitHub repo
+# DESC: Generate handover prompt and print it to stdout for Tool 2
 # RUN: Tool2
 
+import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
-OUT = ROOT / "handover-prompt.txt"
+# Force UTF-8 stdout so Tool 2 receives the text correctly
+sys.stdout.reconfigure(encoding="utf-8")
 
 REPO_URL = "https://github.com/dev-learner/ape-stock"
 RAW_BASE = "https://raw.githubusercontent.com/dev-learner/ape-stock/main"
@@ -47,9 +48,7 @@ Continue from this exact state and before anything else:
 1. Confirm your understanding of ape-stock.
 2. Where we are in the development cycle (what are we currently working on and what's next?).
 3. Any initial questions - Please ask.
-4. Welcome to the ape-stock dev team! 😘
+4. Welcome to the ape-stock dev team!
 """
 
-OUT.write_text(prompt, encoding="utf-8")
-print(f"Wrote {OUT}")
-print(f"Prompt size: {len(prompt):,} characters")
+print(prompt)
