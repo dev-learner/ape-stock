@@ -205,6 +205,7 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS portfolio_positions (
             symbol TEXT PRIMARY KEY,
+            name TEXT,
             quantity REAL NOT NULL,
             avg_cost REAL NOT NULL,
             updated TEXT

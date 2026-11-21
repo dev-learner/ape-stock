@@ -27,8 +27,12 @@ def _get_rank(cur, symbol, date_str):
     return row[0] if row else None
 
 def _get_name(cur, symbol):
-    """Look up company name from index_quotes."""
+    """Look up company name from index_quotes or external_constituents."""
     cur.execute("SELECT name FROM index_quotes WHERE symbol = ?", (symbol,))
+    row = cur.fetchone()
+    if row and row["name"]:
+        return row["name"]
+    cur.execute("SELECT name FROM external_constituents WHERE symbol = ?", (symbol,))
     row = cur.fetchone()
     return row["name"] if row else None
 
@@ -41,9 +45,12 @@ def summary():
     deposited = _total_deposited(cur)
 
     cur.execute("""
-        SELECT p.symbol, p.quantity, p.avg_cost, q.price, q.name
+        SELECT p.symbol, p.quantity, p.avg_cost,
+               COALESCE(q.price, e.price) AS price,
+               COALESCE(q.name, e.name, p.name) AS name
         FROM portfolio_positions p
         LEFT JOIN index_quotes q ON q.symbol = p.symbol
+        LEFT JOIN external_constituents e ON e.symbol = p.symbol
         WHERE p.quantity > 0
     """)
     positions = []
@@ -189,14 +196,14 @@ def buy():
         new_avg = (old_qty * old_avg + qty * price) / new_qty
         cur.execute("""
             UPDATE portfolio_positions
-            SET quantity = ?, avg_cost = ?, updated = ?
+            SET quantity = ?, avg_cost = ?, name = COALESCE(?, name), updated = ?
             WHERE symbol = ?
-        """, (new_qty, new_avg, ts, symbol))
+        """, (new_qty, new_avg, name, ts, symbol))
     else:
         cur.execute("""
-            INSERT INTO portfolio_positions (symbol, quantity, avg_cost, updated)
-            VALUES (?, ?, ?, ?)
-        """, (symbol, qty, price, ts))
+            INSERT INTO portfolio_positions (symbol, name, quantity, avg_cost, updated)
+            VALUES (?, ?, ?, ?, ?)
+        """, (symbol, name, qty, price, ts))
 
     conn.commit()
     conn.close()
