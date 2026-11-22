@@ -15,9 +15,13 @@ def get_db():
     return conn
 
 def init_db():
+    """Create all tables and ensure index_quotes has the full expected schema.
+    Safe to run on both fresh and existing databases.
+    """
     conn = get_db()
     cur = conn.cursor()
 
+    # --- Base tables (CREATE IF NOT EXISTS) ---
     cur.execute("""
         CREATE TABLE IF NOT EXISTS index_constituents (
             index_key TEXT,
@@ -143,6 +147,12 @@ def init_db():
 
     cur.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('tracker_close_target', '3')")
 
+    # Clear any leftover Tool 2 pause flag on startup
+    cur.execute("""
+        INSERT INTO app_settings (key, value) VALUES ('background_paused', '0')
+        ON CONFLICT(key) DO UPDATE SET value = '0'
+    """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS daily_ranks (
             symbol TEXT,
@@ -267,6 +277,27 @@ def init_db():
     cols = [row[1] for row in cur.fetchall()]
     if "price" not in cols:
         cur.execute("ALTER TABLE external_constituents ADD COLUMN price REAL")
+
+    # --- Ensure full index_quotes schema (fresh + existing DBs) ---
+    index_quotes_columns = [
+        ("sector", "TEXT"),
+        ("market_cap", "INTEGER"),
+        ("ret_3m", "REAL"),
+        ("ret_6m", "REAL"),
+        ("dist_52w_high", "REAL"),
+        ("above_50ma", "INTEGER"),
+        ("pct_from_50ma", "REAL"),
+        ("above_200ma", "INTEGER"),
+        ("pct_from_200ma", "REAL"),
+        ("vol_20d", "REAL"),
+        ("sector_rel_1d", "REAL"),
+        ("sector_rel_5d", "REAL"),
+    ]
+    for col, typ in index_quotes_columns:
+        try:
+            cur.execute(f"ALTER TABLE index_quotes ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError:
+            pass
 
     conn.commit()
     conn.close()
