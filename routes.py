@@ -377,6 +377,7 @@ def search():
 
 @bp.route("/schema")
 def schema():
+    """Return full database schema plus the most recent row values for each table."""
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -387,8 +388,34 @@ def schema():
         columns = [{"name": r[1], "type": r[2]} for r in cur.fetchall()]
         cur.execute(f"SELECT COUNT(*) FROM {table}")
         count = cur.fetchone()[0]
-        result.append({"table": table, "columns": columns, "rows": count})
+
+        # Grab the newest row (best-effort: prefer a timestamp-like column if present)
+        latest = {}
+        try:
+            # Prefer common timestamp columns for ordering
+            order_col = None
+            for candidate in ("updated", "created", "date", "ts", "timestamp", "id"):
+                if any(c["name"] == candidate for c in columns):
+                    order_col = candidate
+                    break
+            if order_col:
+                cur.execute(f"SELECT * FROM {table} ORDER BY {order_col} DESC LIMIT 1")
+            else:
+                cur.execute(f"SELECT * FROM {table} LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                latest = dict(row)
+        except Exception:
+            latest = {}
+
+        result.append({
+            "table": table,
+            "columns": columns,
+            "rows": count,
+            "latest": latest
+        })
     conn.close()
+
     db_path = "ape_stock.db"
     size_bytes = os.path.getsize(db_path) if os.path.exists(db_path) else 0
     size_mb = round(size_bytes / (1024 * 1024), 2)

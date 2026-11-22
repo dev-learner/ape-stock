@@ -1,4 +1,6 @@
 // static/js/dashboard.js
+// Dashboard overview, notes, buy checklist, tool cards with To-Dos, schema and open items.
+// Schema card is wide, left-aligned, shows latest values, and auto-refreshes with a flash on change.
 window.Dashboard = {
     async show() {
         const container = document.getElementById("results");
@@ -195,10 +197,10 @@ window.Dashboard = {
                     </div>
                 </div>
 
-                <!-- Database Schema (live) -->
-                <div class="card" id="schema-card">
-                    <h3>Database Schema</h3>
-                    <div class="section" id="schema-content" style="font-size:0.85rem; line-height:1.4;">
+                <!-- Database Schema (wide + live) -->
+                <div class="card" id="schema-card" style="grid-column:1 / -1;">
+                    <h3>Database Schema <span id="schema-meta" style="font-size:0.8rem; color:#7fdbff; font-weight:normal;"></span></h3>
+                    <div class="section" id="schema-content" style="font-size:0.82rem; line-height:1.35;">
                         Loading…
                     </div>
                 </div>
@@ -224,6 +226,7 @@ window.Dashboard = {
                     <div class="section">
                         <ul>
                             <li>News / RNS presence or negative-keyword flag on screener and risers/fallers</li>
+                            <li>Integrate or link reputable FTSE market analysis & commentary (primary candidates: Sharecast daily roundups + AJ Bell market commentary) for decision context beyond official RNS and Yahoo</li>
                             <li>Simple alerts for open positions (price drop, rank drop, MA loss)</li>
                             <li>Optional acceleration cue (3 m vs 6 m) on the technical screener</li>
                             <li>Walk-forward version of the persistence ranking for more realistic testing</li>
@@ -233,21 +236,8 @@ window.Dashboard = {
             </div>
         `;
 
-        // Live schema
-        try {
-            const schemaRes = await fetch("/schema");
-            const schema = await schemaRes.json();
-            const el = document.getElementById("schema-content");
-            if (el && schema.tables) {
-                el.innerHTML = schema.tables.map(t => {
-                    const cols = t.columns.map(c => c.name).join(", ");
-                    return `<strong>${t.table}</strong> (${t.rows} rows) — ${cols}`;
-                }).join("<br>");
-            }
-        } catch (e) {
-            const el = document.getElementById("schema-content");
-            if (el) el.textContent = "Schema unavailable";
-        }
+        // Initial schema load
+        this.refreshSchema();
 
         // Notes Edit / Save toggle
         const notesToggle = document.getElementById("notes-toggle");
@@ -257,11 +247,11 @@ window.Dashboard = {
             notesToggle.addEventListener("click", () => {
                 const editing = notesEdit.style.display !== "none";
                 if (editing) {
-                    const text = notesEdit.value;
-                    localStorage.setItem("dashboard_notes", text);
-                    notesDisplay.innerHTML = this.escapeHtml(text) || "<span style='color:#666;'>No notes yet.</span>";
-                    notesDisplay.style.display = "";
+                    const val = notesEdit.value;
+                    localStorage.setItem("dashboard_notes", val);
+                    notesDisplay.innerHTML = this.escapeHtml(val) || "<span style='color:#666;'>No notes yet.</span>";
                     notesEdit.style.display = "none";
+                    notesDisplay.style.display = "";
                     notesToggle.textContent = "Edit";
                 } else {
                     notesDisplay.style.display = "none";
@@ -274,13 +264,125 @@ window.Dashboard = {
 
         // Fill risers/fallers counts if present
         if (status.risers != null) {
-            const r = document.getElementById("dash-risers");
-            if (r) r.textContent = status.risers;
+            const el = document.getElementById("dash-risers");
+            if (el) el.textContent = status.risers;
         }
         if (status.fallers != null) {
-            const f = document.getElementById("dash-fallers");
-            if (f) f.textContent = status.fallers;
+            const el = document.getElementById("dash-fallers");
+            if (el) el.textContent = status.fallers;
         }
+    },
+
+    // Refresh schema content (called on show and by auto-refresh)
+    // Shows Column | Type | Latest and flashes individual cells that changed.
+    async refreshSchema() {
+        const el = document.getElementById("schema-content");
+        const meta = document.getElementById("schema-meta");
+        if (!el) return;
+
+        try {
+            const schemaRes = await fetch("/schema");
+            if (!schemaRes.ok) {
+                throw new Error(`HTTP ${schemaRes.status}`);
+            }
+            const schema = await schemaRes.json();
+
+            if (meta && schema.db_size_mb != null) {
+                meta.textContent = `(${schema.db_size_mb} MB)`;
+            }
+
+            // Store previous latest values so we can detect changes
+            if (!this._prevLatest) this._prevLatest = {};
+
+            let newHtml = "No tables found";
+            const changedCells = []; // collect cells to flash after render
+
+            if (schema.tables && Array.isArray(schema.tables) && schema.tables.length) {
+                newHtml = schema.tables.map(t => {
+                    const latest = t.latest || {};
+                    const tableKey = t.table;
+                    if (!this._prevLatest[tableKey]) this._prevLatest[tableKey] = {};
+
+                    const cols = (t.columns || []).map(c => {
+                        let val = latest[c.name];
+                        const rawVal = val;
+                        if (val == null) val = "—";
+                        else if (typeof val === "number") val = val.toLocaleString();
+                        else val = String(val).length > 60 ? String(val).slice(0, 57) + "…" : String(val);
+
+                        const prev = this._prevLatest[tableKey][c.name];
+                        const changed = prev !== undefined && String(prev) !== String(rawVal);
+                        if (changed) {
+                            changedCells.push(`${tableKey}::${c.name}`);
+                        }
+                        this._prevLatest[tableKey][c.name] = rawVal;
+
+                        const cellId = `latest-${tableKey}-${c.name}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+                        return `
+                            <tr>
+                                <td style="padding:3px 12px 3px 0; color:#e0e0e0; white-space:nowrap; border-bottom:1px solid rgba(255,255,255,0.04);">${c.name || ""}</td>
+                                <td style="padding:3px 12px 3px 0; color:#aaa; white-space:nowrap; border-bottom:1px solid rgba(255,255,255,0.04);">${c.type || "—"}</td>
+                                <td id="${cellId}" style="padding:3px 0; color:#7fdbff; white-space:nowrap; border-bottom:1px solid rgba(255,255,255,0.04);">${this.escapeHtml(val)}</td>
+                            </tr>
+                        `;
+                    }).join("");
+
+                    return `
+                        <div style="margin-bottom:14px; background:#0d1b2a; border:1px solid rgba(127,219,255,0.2); border-radius:6px; overflow:hidden;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 14px; background:rgba(127,219,255,0.08); border-bottom:1px solid rgba(127,219,255,0.15);">
+                                <strong style="color:#7fdbff; font-size:0.95rem;">${t.table || ""}</strong>
+                                <span style="color:#aaa; font-size:0.8rem;">${(t.rows || 0).toLocaleString()} rows</span>
+                            </div>
+                            <div style="padding:8px 14px 10px; overflow-x:auto;">
+                                <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                                    <thead>
+                                        <tr>
+                                            <th style="text-align:left; padding:4px 12px 4px 0; color:#7fdbff; width:200px; white-space:nowrap;">Column</th>
+                                            <th style="text-align:left; padding:4px 12px 4px 0; color:#7fdbff; width:100px; white-space:nowrap;">Type</th>
+                                            <th style="text-align:left; padding:4px 0; color:#7fdbff; white-space:nowrap;">Latest</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${cols}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    `;
+                }).join("");
+            }
+
+            el.innerHTML = newHtml;
+
+            // Flash only the cells that actually changed
+            changedCells.forEach(key => {
+                const [table, col] = key.split("::");
+                const cellId = `latest-${table}-${col}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+                const cell = document.getElementById(cellId);
+                if (cell) this.flashCell(cell);
+            });
+
+        } catch (e) {
+            console.error("Schema refresh failed:", e);
+            el.textContent = "Schema unavailable";
+            if (meta) meta.textContent = "";
+        }
+    },
+
+    // Flash a single cell (used for changed latest values)
+    flashCell(cell) {
+        if (!cell) return;
+        cell.style.transition = "none";
+        cell.style.backgroundColor = "rgba(127, 219, 255, 0.35)";
+        cell.style.color = "#fff";
+        setTimeout(() => {
+            cell.style.transition = "background-color 1.6s ease-out, color 1.6s ease-out";
+            cell.style.backgroundColor = "";
+            cell.style.color = "#7fdbff";
+        }, 50);
+        setTimeout(() => {
+            cell.style.transition = "";
+        }, 1700);
     },
 
     formatDate(iso) {
@@ -288,17 +390,27 @@ window.Dashboard = {
         try {
             const d = new Date(iso);
             return d.toLocaleString("en-GB", { timeZone: "Europe/London" });
-        } catch {
+        } catch (e) {
             return iso;
         }
     },
 
-    escapeHtml(str) {
-        if (!str) return "";
-        return str
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;");
+    escapeHtml(text) {
+        if (!text) return "";
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+    }
+};
+
+// Hook into the global auto-refresh cycle so schema updates while Dashboard is visible
+const originalRefreshVisible = window.refreshVisible;
+window.refreshVisible = async function () {
+    if (typeof originalRefreshVisible === "function") {
+        await originalRefreshVisible();
+    }
+    // Refresh schema only when Dashboard is the current view
+    if (window.AppState && window.AppState.currentTool === "dashboard" && window.Dashboard && typeof window.Dashboard.refreshSchema === "function") {
+        window.Dashboard.refreshSchema();
     }
 };
