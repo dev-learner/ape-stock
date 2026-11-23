@@ -1,47 +1,62 @@
 # scripts/dump_holdings_history.py
-# DESC: Dump all holdings_history rows in aligned columns
+# NAME: Dump Holdings History
+# DESC: Prints every row from the holdings_history table in aligned columns.
+# DETAIL: Diagnostic dump of closed positions. Read-only.
+# ALLOW_DELETE: 1
 # RUN: Tool2
+
+"""
+Dump Holdings History
+---------------------
+Prints the full contents of the holdings_history table as a fixed-width table,
+ordered by most recently closed first.
+"""
 
 import sqlite3
 from pathlib import Path
 
-db_path = Path(__file__).parent.parent / "ape_stock.db"
-conn = sqlite3.connect(db_path, timeout=20)
-conn.row_factory = sqlite3.Row
-cur = conn.cursor()
+DB_PATH = Path(__file__).parent.parent / "ape_stock.db"
 
-cur.execute("PRAGMA table_info(holdings_history)")
-cols = [r[1] for r in cur.fetchall()]
-print("Columns:", cols)
+def main():
+    conn = sqlite3.connect(DB_PATH, timeout=20)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
 
-cur.execute(f"SELECT {', '.join(cols)} FROM holdings_history ORDER BY closed_at DESC, id DESC")
-rows = cur.fetchall()
+    cur.execute("PRAGMA table_info(holdings_history)")
+    cols = [r[1] for r in cur.fetchall()]
+    print("Columns:", cols)
 
-if not rows:
-    print("holdings_history is empty")
-else:
-    formatted = []
-    for r in rows:
-        line = []
-        for c in cols:
-            val = r[c]
-            if isinstance(val, float):
-                line.append(f"{val:.4f}")
-            else:
-                line.append(str(val) if val is not None else "")
-        formatted.append(line)
+    cur.execute(f"SELECT {', '.join(cols)} FROM holdings_history ORDER BY closed_at DESC, id DESC")
+    rows = cur.fetchall()
 
-    widths = [len(c) for c in cols]
-    for line in formatted:
-        for i, cell in enumerate(line):
-            widths[i] = max(widths[i], len(cell))
+    if not rows:
+        print("holdings_history is empty")
+    else:
+        formatted = []
+        for r in rows:
+            line = []
+            for c in cols:
+                val = r[c]
+                if isinstance(val, float):
+                    line.append(f"{val:.4f}")
+                else:
+                    line.append(str(val) if val is not None else "")
+            formatted.append(line)
 
-    header = "  ".join(c.ljust(widths[i]) for i, c in enumerate(cols))
-    print(header)
-    print("-" * len(header))
+        widths = [len(c) for c in cols]
+        for line in formatted:
+            for i, cell in enumerate(line):
+                widths[i] = max(widths[i], len(cell))
 
-    for line in formatted:
-        print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line)))
+        header = "  ".join(c.ljust(widths[i]) for i, c in enumerate(cols))
+        print(header)
+        print("-" * len(header))
 
-print(f"\nTotal rows: {len(rows)}")
-conn.close()
+        for line in formatted:
+            print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line)))
+
+    print(f"\nTotal rows: {len(rows)}")
+    conn.close()
+
+if __name__ == "__main__":
+    main()

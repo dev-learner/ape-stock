@@ -3,11 +3,14 @@ import subprocess
 import sys
 import json
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from flask import Blueprint, request, jsonify
 from db import get_setting, set_setting
 
 SCRIPTS_DIR = Path(__file__).parent / "scripts"
 bp = Blueprint("scripts", __name__)
+UK = ZoneInfo("Europe/London")
 
 @bp.route("/scripts/list")
 def scripts_list():
@@ -30,11 +33,15 @@ def scripts_run():
             [sys.executable, str(script_path)],
             capture_output=True,
             text=True,
-            timeout=300,          # raised for longer scripts
+            timeout=300,
             cwd=str(SCRIPTS_DIR),
             encoding="utf-8",
             errors="replace"
         )
+        # Record last-run timestamp
+        last_runs = _load_last_runs()
+        last_runs[name] = datetime.now(UK).isoformat()
+        _save_last_runs(last_runs)
         return jsonify({
             "stdout": result.stdout,
             "stderr": result.stderr,
@@ -47,31 +54,46 @@ def scripts_run():
 
 @bp.route("/scripts/meta")
 def scripts_meta():
-    """Return DESC and RUN comments from a script."""
+    """Return NAME, DESC, DETAIL, ALLOW_DELETE and RUN from a script header."""
     name = request.args.get("name", "").strip()
     if not name or not name.endswith(".py") or "/" in name or "\\" in name:
-        return jsonify({"name": name, "desc": "", "run": ""})
+        return jsonify({"name": name, "friendly": name, "desc": "", "detail": "", "allow_delete": 0, "run": ""})
 
     path = SCRIPTS_DIR / name
     if not path.exists():
-        return jsonify({"name": name, "desc": "", "run": ""})
+        return jsonify({"name": name, "friendly": name, "desc": "", "detail": "", "allow_delete": 0, "run": ""})
 
+    friendly = name
     desc = ""
+    detail = ""
+    allow_delete = 0
     run = ""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
-        for line in text.splitlines()[:30]:
+        for line in text.splitlines()[:40]:
             line = line.strip()
-            if line.startswith("# DESC:"):
+            if line.startswith("# NAME:"):
+                friendly = line[7:].strip() or name
+            elif line.startswith("# DESC:"):
                 desc = line[7:].strip()
+            elif line.startswith("# DETAIL:"):
+                detail = line[9:].strip()
+            elif line.startswith("# ALLOW_DELETE:"):
+                val = line[15:].strip()
+                allow_delete = 1 if val == "1" else 0
             elif line.startswith("# RUN:"):
                 run = line[6:].strip()
-            if desc and run:
-                break
     except Exception:
         pass
 
-    return jsonify({"name": name, "desc": desc, "run": run})
+    return jsonify({
+        "name": name,
+        "friendly": friendly,
+        "desc": desc,
+        "detail": detail,
+        "allow_delete": allow_delete,
+        "run": run
+    })
 
 # --- Pause control ---
 @bp.route("/scripts/pause", methods=["POST"])
@@ -111,11 +133,28 @@ def scripts_increment():
 @bp.route("/scripts/clear_counts", methods=["POST"])
 def scripts_clear_counts():
     set_setting("script_run_counts", "{}")
+    set_setting("script_last_runs", "{}")
     return jsonify({"ok": True})
+
+# --- Last-run timestamps ---
+def _load_last_runs():
+    raw = get_setting("script_last_runs", "{}")
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+def _save_last_runs(runs):
+    set_setting("script_last_runs", json.dumps(runs))
+
+@bp.route("/scripts/last_runs")
+def scripts_last_runs():
+    return jsonify(_load_last_runs())
 
 @bp.route("/scripts/delete", methods=["POST"])
 def scripts_delete():
-    """Delete one or more scripts from the scripts directory."""
+    """Delete one or more scripts from the scripts directory.
+    Protected scripts (ALLOW_DELETE: 0) are refused."""
     data = request.get_json(silent=True) or {}
     names = data.get("scripts", [])
     if not isinstance(names, list):
@@ -131,6 +170,21 @@ def scripts_delete():
         path = SCRIPTS_DIR / name
         if not path.exists():
             errors.append(f"Not found: {name}")
+            continue
+        # Check ALLOW_DELETE
+        meta_resp = scripts_meta.__wrapped__() if hasattr(scripts_meta, "__wrapped__") else None
+        # Simple re-parse for safety
+        allow = 0
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for line in text.splitlines()[:40]:
+                if line.strip().startswith("# ALLOW_DELETE:"):
+                    allow = 1 if line.strip()[15:].strip() == "1" else 0
+                    break
+        except Exception:
+            allow = 0
+        if allow == 0:
+            errors.append(f"Deletion not allowed: {name}")
             continue
         try:
             path.unlink()

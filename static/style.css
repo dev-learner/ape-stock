@@ -611,3 +611,62 @@ canvas.spark {
 .settings-page .card h3 {
     margin-top: 0;
 }
+
+/* Tool 2 script cards */
+.script-card {
+    background: #132337;
+    border: 1px solid #1e3a5c;
+    border-left: 3px solid #1e5c3a;
+    border-radius: 8px;
+    padding: 14px 16px 48px 16px;   /* extra bottom padding for buttons */
+    position: relative;
+    min-height: 130px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.script-card:hover {
+    border-color: #2a6f4e;
+    background: #17304a;
+}
+.script-card.protected {
+    opacity: 0.95;
+}
+.script-card .script-name {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #e8f4ff;
+    margin: 0 0 4px;
+    padding-right: 70px;            /* room for the Used badge */
+}
+.script-card .script-desc {
+    font-size: 0.82rem;
+    color: #9bb8d4;
+    line-height: 1.35;
+    margin: 0 0 6px;
+    padding-right: 8px;
+}
+.script-card .script-last {
+    font-size: 0.75rem;
+    color: #6a8aab;
+}
+.script-card .run-badge {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+}
+.script-card .script-actions {
+    position: absolute;
+    bottom: 10px;
+    left: 12px;
+    right: 12px;
+    display: flex;
+    justify-content: space-between;
+}
+.script-card .lock-icon {
+    margin-left: 4px;
+    opacity: 0.7;
+}
+.script-card .script-delete:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}

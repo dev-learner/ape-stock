@@ -1,11 +1,30 @@
 # scripts/bme_full_data.py
-# DESC: Dump all latest technical and fundamental data for BME.L
+# NAME: Dump BME.L Full Data
+# DESC: Prints every technical and fundamental field currently held for BME.L.
+# DETAIL: Dumps the complete latest row from index_quotes, fundamentals, the most recent daily close, the latest rank, watchlist status, and any open holdings for the symbol BME.L. Created as a reference for the data shape used by a single-stock Grok-It! prompt. Read-only; makes no changes to the database.
+# ALLOW_DELETE: 1
 # RUN: Tool2
+
+"""
+Dump BME.L Full Data
+--------------------
+A read-only diagnostic script that prints every field currently stored
+for the symbol BME.L across the main tables:
+
+- index_quotes     (price, change, screener metrics, etc.)
+- fundamentals     (valuation, margins, market cap, etc.)
+- daily_closes     (most recent bar)
+- daily_ranks      (most recent rank)
+- watchlist
+- holdings         (open positions only)
+
+Useful as a template when building Grok-It! prompts or when debugging
+why a particular name looks the way it does in the tools.
+"""
 
 import sqlite3
 from pathlib import Path
 
-# Database lives in the project root
 DB_PATH = Path(__file__).resolve().parent.parent / "ape_stock.db"
 SYMBOL = "BME.L"
 
@@ -20,7 +39,7 @@ def main():
 
     print(f"=== Latest data for {SYMBOL} ===\n")
 
-    # --- index_quotes (price + screener metrics) ---
+    # --- index_quotes ---
     print("--- index_quotes ---")
     cur.execute("SELECT * FROM index_quotes WHERE symbol = ?", (SYMBOL,))
     row = cur.fetchone()
@@ -60,7 +79,7 @@ def main():
         print("  (no daily closes)")
     print()
 
-    # --- current rank (most recent) ---
+    # --- latest rank ---
     print("--- latest daily_ranks ---")
     cur.execute("""
         SELECT date, rank, score, persistence_days
@@ -77,7 +96,7 @@ def main():
         print("  (no rank data)")
     print()
 
-    # --- watchlist status ---
+    # --- watchlist ---
     print("--- watchlist ---")
     cur.execute("SELECT * FROM watchlist WHERE symbol = ?", (SYMBOL,))
     row = cur.fetchone()
@@ -88,7 +107,7 @@ def main():
         print("  (not on watchlist)")
     print()
 
-    # --- open holdings (if any) ---
+    # --- open holdings ---
     print("--- open holdings ---")
     cur.execute("""
         SELECT * FROM holdings

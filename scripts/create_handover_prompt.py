@@ -1,17 +1,35 @@
 # scripts/create_handover_prompt.py
-# DESC: Generate handover prompt and print it to stdout for Tool 2
+# NAME: Generate Handover Prompt
+# DESC: Prints a ready-to-use handover prompt for continuing ape-stock development.
+# DETAIL: Outputs a standardised prompt that points a new assistant at the GitHub repository, lists the key entry-point files, and restates the project rules (UK-only, modular changes, complete-file returns, etc.). Read-only; makes no changes to the database or filesystem.
+# ALLOW_DELETE: 1
 # RUN: Tool2
 
-import sys
-from pathlib import Path
+"""
+Generate Handover Prompt
+------------------------
+Prints a complete handover prompt to stdout so it can be copied from the
+Tool 2 output panel and pasted into a new conversation.
 
-# Force UTF-8 stdout so Tool 2 receives the text correctly
+The prompt includes:
+- Repository URL and raw links to the main source files
+- Instructions to examine the Dashboard and repository structure
+- The standing project rules (FTSE-only, modular changes, full-file returns)
+- The required opening checklist for a new session
+
+No database access and no side effects.
+"""
+
+import sys
+
+# Ensure UTF-8 output so Tool 2 receives the text correctly
 sys.stdout.reconfigure(encoding="utf-8")
 
 REPO_URL = "https://github.com/dev-learner/ape-stock"
 RAW_BASE = "https://raw.githubusercontent.com/dev-learner/ape-stock/main"
 
-prompt = f"""You are continuing development of a local Flask application called ape-stock.
+def main():
+    prompt = f"""You are continuing development of a local Flask application called ape-stock.
 
 The complete, up-to-date source is in the public repository:
 {REPO_URL}
@@ -50,5 +68,7 @@ Continue from this exact state and before anything else:
 3. Any initial questions - Please ask.
 4. Welcome to the ape-stock dev team!
 """
+    print(prompt)
 
-print(prompt)
+if __name__ == "__main__":
+    main()

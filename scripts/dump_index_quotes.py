@@ -1,51 +1,61 @@
-# dump_index_quotes.py
-# DESC: Dump all index_quotes rows in aligned columns
+# scripts/dump_index_quotes.py
+# NAME: Dump Index Quotes
+# DESC: Prints every row from the index_quotes table in aligned columns.
+# DETAIL: Diagnostic dump of the current quote and screener-metrics snapshot. Read-only.
+# ALLOW_DELETE: 1
 # RUN: Tool2
+
+"""
+Dump Index Quotes
+-----------------
+Prints the full contents of the index_quotes table as a fixed-width table.
+"""
 
 import sqlite3
 from pathlib import Path
 
-db_path = Path(__file__).parent.parent / "ape_stock.db"
-conn = sqlite3.connect(db_path)
-conn.row_factory = sqlite3.Row
-cur = conn.cursor()
+DB_PATH = Path(__file__).parent.parent / "ape_stock.db"
 
-cur.execute("SELECT * FROM index_quotes ORDER BY symbol")
-rows = cur.fetchall()
+def main():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
 
-if not rows:
-    print("index_quotes is empty")
-else:
-    cols = list(rows[0].keys())
+    cur.execute("SELECT * FROM index_quotes ORDER BY symbol")
+    rows = cur.fetchall()
 
-    # Build formatted rows
-    formatted = []
-    for r in rows:
-        line = []
-        for c in cols:
-            val = r[c]
-            if isinstance(val, float):
-                line.append(f"{val:.4f}")
-            elif val is None:
-                line.append("")
-            else:
-                line.append(str(val))
-        formatted.append(line)
+    if not rows:
+        print("index_quotes is empty")
+    else:
+        cols = list(rows[0].keys())
 
-    # Calculate column widths
-    widths = [len(c) for c in cols]
-    for line in formatted:
-        for i, cell in enumerate(line):
-            widths[i] = max(widths[i], len(cell))
+        formatted = []
+        for r in rows:
+            line = []
+            for c in cols:
+                val = r[c]
+                if isinstance(val, float):
+                    line.append(f"{val:.4f}")
+                elif val is None:
+                    line.append("")
+                else:
+                    line.append(str(val))
+            formatted.append(line)
 
-    # Print header
-    header = "  ".join(c.ljust(widths[i]) for i, c in enumerate(cols))
-    print(header)
-    print("-" * len(header))
+        widths = [len(c) for c in cols]
+        for line in formatted:
+            for i, cell in enumerate(line):
+                widths[i] = max(widths[i], len(cell))
 
-    # Print rows
-    for line in formatted:
-        print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line)))
+        header = "  ".join(c.ljust(widths[i]) for i, c in enumerate(cols))
+        print(header)
+        print("-" * len(header))
 
-print(f"\nTotal rows: {len(rows)}")
-conn.close()
+        for line in formatted:
+            print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line)))
+
+    print(f"\nTotal rows: {len(rows)}")
+    conn.close()
+
+if __name__ == "__main__":
+    main()

@@ -1,7 +1,6 @@
 // static/js/tool2.js
 window.Tool2 = {
     async show() {
-        // Pause background + auto-refresh while we are in Tool 2
         await fetch("/scripts/pause", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
@@ -15,7 +14,6 @@ window.Tool2 = {
     },
 
     async hide() {
-        // Resume background + auto-refresh when leaving Tool 2
         await fetch("/scripts/pause", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
@@ -33,48 +31,52 @@ window.Tool2 = {
     async render(files) {
         const container = document.getElementById("results");
 
-        // Load current counts
         let counts = {};
+        let lastRuns = {};
         try {
             const cRes = await fetch("/scripts/counts");
             counts = await cRes.json();
+            const lRes = await fetch("/scripts/last_runs");
+            lastRuns = await lRes.json();
         } catch (e) {
-            console.warn("Could not load script counts", e);
+            console.warn("Could not load script metadata", e);
         }
 
-        // Fetch DESC metadata
         const meta = await Promise.all(files.map(async f => {
             try {
                 const r = await fetch(`/scripts/meta?name=${encodeURIComponent(f)}`);
                 return await r.json();
             } catch {
-                return { name: f, desc: "", run: "" };
+                return { name: f, friendly: f, desc: "", detail: "", allow_delete: 0 };
             }
         }));
 
-        let buttonsHtml = "";
+        let cardsHtml = "";
         meta.forEach(m => {
-            const title = m.desc ? m.desc.replace(/"/g, "&quot;") : m.name;
             const used = counts[m.name] || 0;
-            buttonsHtml += `
-                <button class="script-btn" 
-                        data-script="${m.name}" 
-                        title="${title}"
-                        style="position:relative;">
-                    <span class="script-name">${m.name}</span>
+            const last = lastRuns[m.name] ? lastRuns[m.name].slice(0, 10) : "Never";
+            const protectedClass = m.allow_delete === 0 ? "protected" : "";
+            const lock = m.allow_delete === 0 ? '<span class="lock-icon" title="Protected">🔒</span>' : "";
+            cardsHtml += `
+                <div class="script-card ${protectedClass}" data-script="${m.name}">
+                    <div class="script-card-body">
+                        <div class="script-name">${m.friendly || m.name}</div>
+                        <div class="script-desc">${m.desc || ""}</div>
+                        <div class="script-last">Last run: ${last}</div>
+                    </div>
                     <span class="run-badge tool2">Used: ${used}</span>
-                    <input type="checkbox" class="script-select" data-script="${m.name}"
-                           style="position:absolute; bottom:4px; right:4px; width:15px; height:15px; cursor:pointer; z-index:2;"
-                           title="Select for deletion">
-                </button>`;
+                    <div class="script-actions">
+                        <button class="mini-btn script-run" data-script="${m.name}">Run</button>
+                        <button class="mini-btn script-delete" data-script="${m.name}" ${m.allow_delete === 0 ? "disabled" : ""}>
+                            Delete ${lock}
+                        </button>
+                    </div>
+                </div>`;
         });
 
-        buttonsHtml += `
-            <button class="script-btn" id="tool2-refresh" title="Re-scan scripts directory" style="background:#1e5c3a;">
+        cardsHtml += `
+            <button class="script-btn" id="tool2-refresh" title="Re-scan scripts directory" style="background:#1e5c3a; text-align:center; justify-content:center;">
                 Refresh
-            </button>
-            <button class="script-btn" id="tool2-delete" title="Delete selected scripts" style="background:#5c2a2a;">
-                Delete
             </button>
             <button class="script-btn cancel-btn" id="tool2-cancel" title="Return to Dashboard">
                 Cancel
@@ -88,47 +90,26 @@ window.Tool2 = {
                 <h3>Ad-Hoc Scripts</h3>
             </div>
             <div class="script-grid">
-                ${buttonsHtml}
+                ${cardsHtml}
             </div>
             <div style="position:relative; margin-top:20px;">
-                <button id="tool2-copy" title="Copy all output to clipboard"
-                        style="position:absolute; top:8px; right:8px; padding:4px 10px; font-size:0.85rem; background:#1e3a5c; color:#fff; border:none; border-radius:4px; cursor:pointer;">
-                    Copy
-                </button>
-                <pre id="script-output" class="script-output" style="margin-top:0; padding-top:36px;"></pre>
+                <div style="display:flex; justify-content:flex-end; gap:6px; margin-bottom:6px;">
+                    <button id="tool2-copy" title="Copy all output to clipboard"
+                            style="padding:4px 10px; font-size:0.85rem; background:#1e3a5c; color:#fff; border:none; border-radius:4px; cursor:pointer;">
+                        Copy
+                    </button>
+                    <button id="tool2-clear" title="Clear output"
+                            style="padding:4px 10px; font-size:0.85rem; background:#5c2a2a; color:#fff; border:none; border-radius:4px; cursor:pointer;">
+                        Clear
+                    </button>
+                </div>
+                <pre id="script-output" class="script-output" style="margin-top:0;"></pre>
             </div>`;
 
         // Refresh
         document.getElementById("tool2-refresh").addEventListener("click", () => this.refresh());
 
-        // Delete selected
-        document.getElementById("tool2-delete").addEventListener("click", async () => {
-            const selected = Array.from(document.querySelectorAll(".script-select:checked"))
-                .map(cb => cb.dataset.script);
-            if (selected.length === 0) {
-                alert("No scripts selected");
-                return;
-            }
-            if (!confirm(`Delete ${selected.length} script(s)?\n\n${selected.join("\n")}`)) {
-                return;
-            }
-            try {
-                const res = await fetch("/scripts/delete", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({scripts: selected})
-                });
-                const data = await res.json();
-                if (data.errors && data.errors.length) {
-                    alert("Some errors:\n" + data.errors.join("\n"));
-                }
-                await this.refresh();
-            } catch (e) {
-                alert("Delete failed: " + e);
-            }
-        });
-
-        // Cancel → leave Tool 2
+        // Cancel
         document.getElementById("tool2-cancel").addEventListener("click", async () => {
             await this.hide();
             const dash = document.querySelector('[data-tool="dashboard"]');
@@ -136,7 +117,7 @@ window.Tool2 = {
             else if (window.Dashboard) window.Dashboard.show();
         });
 
-        // Copy output
+        // Copy
         document.getElementById("tool2-copy").addEventListener("click", async () => {
             const output = document.getElementById("script-output");
             const text = output.textContent || "";
@@ -151,25 +132,41 @@ window.Tool2 = {
             }
         });
 
-        // Script buttons → increment count + run
-        document.querySelectorAll(".script-btn[data-script]").forEach(btn => {
-            btn.addEventListener("click", async (e) => {
-                // Ignore clicks that land on the checkbox
-                if (e.target.classList.contains("script-select")) return;
+        // Clear
+        document.getElementById("tool2-clear").addEventListener("click", () => {
+            document.getElementById("script-output").textContent = "";
+        });
 
+        // Card body click → show DETAIL
+        document.querySelectorAll(".script-card").forEach(card => {
+            card.addEventListener("click", (e) => {
+                if (e.target.closest(".script-actions")) return;
+                const name = card.dataset.script;
+                const m = meta.find(x => x.name === name);
+                const output = document.getElementById("script-output");
+                output.textContent = m && m.detail ? m.detail : "No extended description available.";
+            });
+        });
+
+        // Mini Run buttons
+        document.querySelectorAll(".script-run").forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                e.stopPropagation();
                 const name = btn.dataset.script;
+                const m = meta.find(x => x.name === name);
+                const friendly = m ? (m.friendly || name) : name;
+                if (!confirm(`Run ${friendly} Script?`)) return;
+
                 const output = document.getElementById("script-output");
                 output.textContent = "Running…";
 
-                // Increment count first
                 try {
                     await fetch("/scripts/increment", {
                         method: "POST",
                         headers: {"Content-Type": "application/json"},
                         body: JSON.stringify({script: name})
                     });
-                    // Update badge live
-                    const badge = btn.querySelector(".run-badge");
+                    const badge = btn.closest(".script-card").querySelector(".run-badge");
                     if (badge) {
                         const current = parseInt(badge.textContent.replace(/\D/g, "")) || 0;
                         badge.textContent = `Used: ${current + 1}`;
@@ -178,7 +175,6 @@ window.Tool2 = {
                     console.warn("Could not increment count", e);
                 }
 
-                // Run the script
                 try {
                     const res = await fetch("/scripts/run", {
                         method: "POST",
@@ -191,8 +187,39 @@ window.Tool2 = {
                     } else {
                         output.textContent = (data.stdout || "") + (data.stderr ? "\n--- stderr ---\n" + data.stderr : "");
                     }
+                    // Do NOT refresh here — it was clearing the output
                 } catch (e) {
                     output.textContent = "Request failed: " + e;
+                }
+            });
+        });
+
+        // Mini Delete buttons
+        document.querySelectorAll(".script-delete").forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                const name = btn.dataset.script;
+                const m = meta.find(x => x.name === name);
+                const friendly = m ? (m.friendly || name) : name;
+                if (m && m.allow_delete === 0) {
+                    alert("Deletion NOT allowed!");
+                    return;
+                }
+                if (!confirm(`Delete ${friendly} Script?`)) return;
+
+                try {
+                    const res = await fetch("/scripts/delete", {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({scripts: [name]})
+                    });
+                    const data = await res.json();
+                    if (data.errors && data.errors.length) {
+                        alert("Error:\n" + data.errors.join("\n"));
+                    }
+                    await this.refresh();
+                } catch (e) {
+                    alert("Delete failed: " + e);
                 }
             });
         });
