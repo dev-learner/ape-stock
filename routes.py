@@ -55,6 +55,15 @@ def get_index_data(index_key, direction, limit=None, min_change=None, max_change
 def index():
     return render_template("index.html")
 
+@bp.route("/tool11")
+def tool11_placeholder():
+    """Placeholder endpoint for Tool 11 — Grok-It!"""
+    return jsonify({
+        "status": "ok",
+        "message": "Tool 11 (Grok-It!) placeholder is live",
+        "templates_dir": "grokit/"
+    })
+
 @bp.route("/settings")
 def settings():
     return render_template("settings.html")
