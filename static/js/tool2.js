@@ -74,14 +74,6 @@ window.Tool2 = {
                 </div>`;
         });
 
-        cardsHtml += `
-            <button class="script-btn" id="tool2-refresh" title="Re-scan scripts directory" style="background:#1e5c3a; text-align:center; justify-content:center;">
-                Refresh
-            </button>
-            <button class="script-btn cancel-btn" id="tool2-cancel" title="Return to Dashboard">
-                Cancel
-            </button>`;
-
         container.innerHTML = `
             <div id="tool2-warning" style="background:#5c2a2a; color:#fff; padding:10px 16px; border-radius:6px; margin-bottom:12px; font-weight:600;">
                 ⚠ Tool 2 active — background updates and auto-refresh are paused
@@ -92,16 +84,24 @@ window.Tool2 = {
             <div class="script-grid">
                 ${cardsHtml}
             </div>
-            <div style="position:relative; margin-top:20px;">
-                <div style="display:flex; justify-content:flex-end; gap:6px; margin-bottom:6px;">
-                    <button id="tool2-copy" title="Copy all output to clipboard"
-                            style="padding:4px 10px; font-size:0.85rem; background:#1e3a5c; color:#fff; border:none; border-radius:4px; cursor:pointer;">
-                        Copy
-                    </button>
-                    <button id="tool2-clear" title="Clear output"
-                            style="padding:4px 10px; font-size:0.85rem; background:#5c2a2a; color:#fff; border:none; border-radius:4px; cursor:pointer;">
-                        Clear
-                    </button>
+            <div style="margin-top:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <div style="display:flex; gap:6px;">
+                        <button id="tool2-refresh" style="padding:4px 10px; font-size:0.85rem; background:#1e5c3a; color:#fff; border:none; border-radius:4px; cursor:pointer;">
+                            Refresh
+                        </button>
+                        <button id="tool2-cancel" style="padding:4px 10px; font-size:0.85rem; background:#5c2a2a; color:#fff; border:none; border-radius:4px; cursor:pointer;">
+                            Cancel
+                        </button>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <button id="tool2-copy" style="padding:4px 10px; font-size:0.85rem; background:#1e3a5c; color:#fff; border:none; border-radius:4px; cursor:pointer;">
+                            Copy
+                        </button>
+                        <button id="tool2-clear" style="padding:4px 10px; font-size:0.85rem; background:#5c2a2a; color:#fff; border:none; border-radius:4px; cursor:pointer;">
+                            Clear
+                        </button>
+                    </div>
                 </div>
                 <pre id="script-output" class="script-output" style="margin-top:0;"></pre>
             </div>`;
@@ -187,7 +187,6 @@ window.Tool2 = {
                     } else {
                         output.textContent = (data.stdout || "") + (data.stderr ? "\n--- stderr ---\n" + data.stderr : "");
                     }
-                    // Do NOT refresh here — it was clearing the output
                 } catch (e) {
                     output.textContent = "Request failed: " + e;
                 }

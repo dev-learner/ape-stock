@@ -3,3 +3,5 @@ requests==2.32.3
 pandas
 beautifulsoup4
 yfinance
+python-dotenv
+openai
