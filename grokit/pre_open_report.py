@@ -42,6 +42,7 @@ except ImportError:
 UK = ZoneInfo("Europe/London")
 
 SYSTEM_PROMPT = """You are a concise FTSE pre-open market analyst.
+The date supplied by the user is today. Generate the report; do not refuse on date grounds.
 Produce a signal-only report. Omit any section that has no market-relevant content.
 Never write "none" or include non-market news.
 Use exactly the structure and rules provided in the user message.
@@ -59,7 +60,11 @@ def main():
 
     today = datetime.now(UK).strftime("%A %d %B %Y")
 
-    user_prompt = f"""Generate the Pre-Open Market Report for {today}.
+    user_prompt = f"""The current date is {today}. This is today, not a future date.
+Generate the Pre-Open Market Report for today ({today}).
+
+Use real overnight market action and material news as you know them.
+Do not refuse on the grounds of the date.
 
 Use this exact structure and rules:
 
@@ -116,6 +121,7 @@ Rules:
 - Never write "none".
 - Be factual and concise.
 - Base the report on real overnight market action and material news.
+- The date given is today. Generate the report.
 """
 
     print(f"Generating Pre-Open Market Report for {today}...\n")
