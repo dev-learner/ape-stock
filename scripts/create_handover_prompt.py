@@ -48,7 +48,7 @@ Key entry points (raw links):
 - {RAW_BASE}/templates/index.html
 - {RAW_BASE}/templates/settings.html
 
-To gain a complete understanding of ape-stock examine the Dashboard page, the repository structure and the code within each file.
+To gain a complete understanding of ape-stock examine the repository commits, structure and the code within each file.
 
 Keep the UK-only focus: FTSE 100 & FTSE 250.
 
