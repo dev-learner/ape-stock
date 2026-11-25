@@ -3,7 +3,14 @@ import threading
 from flask import Flask
 from db import init_db
 from background import catchup_daily_closes, background_updater
-from routes import bp as main_bp
+from routes_core import bp as core_bp
+from routes_settings import bp as settings_bp
+from routes_status import bp as status_bp
+from routes_screener import bp as screener_bp
+from routes_tools import bp as tools_bp
+from routes_market import bp as market_bp
+from routes_fundamentals import bp as fundamentals_bp
+from routes_admin import bp as admin_bp
 from scripts_runner import bp as scripts_bp
 from holdings import bp as holdings_bp
 from datetime import datetime, timedelta
@@ -15,7 +22,14 @@ from portfolio import bp as portfolio_bp
 from grokit_runner import bp as grokit_bp
 
 app = Flask(__name__)
-app.register_blueprint(main_bp)
+app.register_blueprint(core_bp)
+app.register_blueprint(settings_bp)
+app.register_blueprint(status_bp)
+app.register_blueprint(screener_bp)
+app.register_blueprint(tools_bp)
+app.register_blueprint(market_bp)
+app.register_blueprint(fundamentals_bp)
+app.register_blueprint(admin_bp)
 app.register_blueprint(scripts_bp)
 app.register_blueprint(holdings_bp)
 app.register_blueprint(portfolio_bp)

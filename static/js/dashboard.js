@@ -230,10 +230,10 @@ window.Dashboard = {
                             <li>Simple alerts for open positions (price drop, rank drop, MA loss)</li>
                             <li>Optional acceleration cue (3 m vs 6 m) on the technical screener</li>
                             <li>Walk-forward version of the persistence ranking for more realistic testing</li>
+                            <li>Refactor routes.py: break the large file down and parse the code into individual components / blueprints (status, screener, tool endpoints, settings, etc.) to reduce complexity and improve maintainability</li>
                         </ul>
                     </div>
                 </div>
-            </div>
         `;
 
         // Initial schema load
