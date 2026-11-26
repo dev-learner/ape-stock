@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from portfolio import bp as portfolio_bp
 from grokit_runner import bp as grokit_bp
+from routes_screens import bp as screens_bp
 
 app = Flask(__name__)
 app.register_blueprint(core_bp)
@@ -34,6 +35,7 @@ app.register_blueprint(scripts_bp)
 app.register_blueprint(holdings_bp)
 app.register_blueprint(portfolio_bp)
 app.register_blueprint(grokit_bp)
+app.register_blueprint(screens_bp)
 
 def _needs_run(key, hours=20):
     """Return True if the given app_settings timestamp is missing or older than `hours`."""

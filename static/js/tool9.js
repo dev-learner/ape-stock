@@ -23,7 +23,14 @@ window.Tool9 = {
         cand_require_div: "0",
         rsiOversold: "30",
         rsiOverbought: "70",
-        rsiLength: "7"
+        rsiLength: "7",
+        // Recovery Screen
+        rec_lookback_months: "12",
+        rec_min_drawdown: "35",
+        rec_min_bounce: "15",
+        rec_require_50ma: "1",
+        rec_min_mcap: "500",
+        rec_min_price: "50"
     },
 
     async show() {
@@ -146,6 +153,29 @@ window.Tool9 = {
                         </div>
                     </div>
 
+                    <!-- Recovery Screen -->
+                    <div class="card">
+                        <h3>Recovery Screen</h3>
+                        <label>Look-back (months)</label>
+                        <input type="number" id="recLookbackMonths" min="3" max="24" step="1">
+                        <label>Min drawdown (%)</label>
+                        <input type="number" id="recMinDrawdown" min="10" max="80" step="1">
+                        <label>Min bounce (%)</label>
+                        <input type="number" id="recMinBounce" min="5" max="50" step="1">
+                        <label>Require above 50-day MA</label>
+                        <select id="recRequire50ma">
+                            <option value="1">Yes</option>
+                            <option value="0">No</option>
+                        </select>
+                        <label>Min market cap (£m)</label>
+                        <input type="number" id="recMinMcap" min="0" step="50">
+                        <label>Min current price (pence)</label>
+                        <input type="number" id="recMinPrice" min="0" step="10">
+                        <div style="text-align:right; margin-top:12px;">
+                            <button class="mini-btn restore" data-section="recovery">Restore Defaults</button>
+                        </div>
+                    </div>
+
                 </div>
             </div>`;
 
@@ -195,6 +225,14 @@ window.Tool9 = {
             set("rsiOverbought", "rsiOverbought");
             set("rsiLength", "rsiLength");
 
+            // Recovery
+            set("recLookbackMonths", "rec_lookback_months");
+            set("recMinDrawdown", "rec_min_drawdown");
+            set("recMinBounce", "rec_min_bounce");
+            set("recRequire50ma", "rec_require_50ma");
+            set("recMinMcap", "rec_min_mcap");
+            set("recMinPrice", "rec_min_price");
+
             const useVal = document.getElementById("useValuation");
             if (useVal) useVal.checked = (merged.use_valuation === "1");
         } catch (e) {
@@ -209,7 +247,8 @@ window.Tool9 = {
             ranking: ["rankWindow", "rankPresence", "rankCutoff"],
             valuation: ["peMin", "peMax", "pbMax", "requireDividend"],
             candidates: ["candRankMax", "candPeMin", "candPeMax", "candPbMax", "candRequireDiv"],
-            rsi: ["rsiOversold", "rsiOverbought", "rsiLength"]
+            rsi: ["rsiOversold", "rsiOverbought", "rsiLength"],
+            recovery: ["recLookbackMonths", "recMinDrawdown", "recMinBounce", "recRequire50ma", "recMinMcap", "recMinPrice"]
         };
         const keys = map[section] || [];
         keys.forEach(id => {
@@ -245,7 +284,14 @@ window.Tool9 = {
             candRequireDiv: "cand_require_div",
             rsiOversold: "rsiOversold",
             rsiOverbought: "rsiOverbought",
-            rsiLength: "rsiLength"
+            rsiLength: "rsiLength",
+            // Recovery
+            recLookbackMonths: "rec_lookback_months",
+            recMinDrawdown: "rec_min_drawdown",
+            recMinBounce: "rec_min_bounce",
+            recRequire50ma: "rec_require_50ma",
+            recMinMcap: "rec_min_mcap",
+            recMinPrice: "rec_min_price"
         };
         return map[id] || id;
     },
@@ -274,7 +320,14 @@ window.Tool9 = {
             cand_require_div: document.getElementById("candRequireDiv").value,
             rsiOversold: document.getElementById("rsiOversold").value,
             rsiOverbought: document.getElementById("rsiOverbought").value,
-            rsiLength: document.getElementById("rsiLength").value
+            rsiLength: document.getElementById("rsiLength").value,
+            // Recovery
+            rec_lookback_months: document.getElementById("recLookbackMonths").value,
+            rec_min_drawdown: document.getElementById("recMinDrawdown").value,
+            rec_min_bounce: document.getElementById("recMinBounce").value,
+            rec_require_50ma: document.getElementById("recRequire50ma").value,
+            rec_min_mcap: document.getElementById("recMinMcap").value,
+            rec_min_price: document.getElementById("recMinPrice").value
         };
 
         try {
@@ -285,15 +338,13 @@ window.Tool9 = {
             });
             const msg = document.getElementById("settings-msg");
             if (res.ok) {
-                Object.keys(payload).forEach(k => localStorage.setItem(k, payload[k]));
                 msg.textContent = "Settings saved";
                 msg.style.color = "#4ade80";
-                msg.style.fontWeight = "600";
             } else {
                 msg.textContent = "Save failed";
                 msg.style.color = "#f87171";
             }
-            setTimeout(() => { msg.textContent = ""; }, 1800);
+            setTimeout(() => { msg.textContent = ""; }, 2000);
         } catch (e) {
             document.getElementById("settings-msg").textContent = "Save error";
         }

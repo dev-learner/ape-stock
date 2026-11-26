@@ -1,5 +1,6 @@
 # routes_settings.py
 # Settings get/save routes extracted from the original routes.py.
+# Includes Recovery Screen parameters with defaults.
 
 from flask import Blueprint, render_template, request, jsonify
 from db import get_setting, set_setting
@@ -30,13 +31,16 @@ def settings_save():
     if "use_valuation" in data:
         set_setting("use_valuation", "1" if str(data["use_valuation"]) in ("1", "true", "True") else "0")
 
-    # All other settings stored as strings
+    # All other settings stored as strings (including Recovery)
     for key in (
         "listLimit", "riserPct", "fallerPct", "hitThreshold", "notional", "stampPct",
         "rsiOversold", "rsiOverbought", "rsiLength",
         "rank_window", "rank_presence", "rank_cutoff",
         "pe_min", "pe_max", "pb_max", "require_dividend",
-        "cand_rank_max", "cand_pe_min", "cand_pe_max", "cand_pb_max", "cand_require_div"
+        "cand_rank_max", "cand_pe_min", "cand_pe_max", "cand_pb_max", "cand_require_div",
+        # Recovery
+        "rec_lookback_months", "rec_min_drawdown", "rec_min_bounce",
+        "rec_require_50ma", "rec_min_mcap", "rec_min_price"
     ):
         if key in data and data[key] is not None:
             set_setting(key, str(data[key]))
@@ -45,7 +49,20 @@ def settings_save():
 
 @bp.route("/settings/get")
 def settings_get():
-    """Return current settings as JSON."""
+    """Return current settings as JSON. Defaults are written if missing."""
+    # Ensure Recovery defaults exist
+    defaults = {
+        "rec_lookback_months": "12",
+        "rec_min_drawdown": "35",
+        "rec_min_bounce": "15",
+        "rec_require_50ma": "1",
+        "rec_min_mcap": "500",
+        "rec_min_price": "50",
+    }
+    for key, val in defaults.items():
+        if get_setting(key) is None:
+            set_setting(key, val)
+
     return jsonify({
         "tracker_close_target": get_setting("tracker_close_target", "3"),
         "listLimit": get_setting("listLimit", "25"),
@@ -70,4 +87,11 @@ def settings_get():
         "cand_pe_max": get_setting("cand_pe_max", "40"),
         "cand_pb_max": get_setting("cand_pb_max", "4"),
         "cand_require_div": get_setting("cand_require_div", "0"),
+        # Recovery (defaults already written above)
+        "rec_lookback_months": get_setting("rec_lookback_months", "12"),
+        "rec_min_drawdown": get_setting("rec_min_drawdown", "35"),
+        "rec_min_bounce": get_setting("rec_min_bounce", "15"),
+        "rec_require_50ma": get_setting("rec_require_50ma", "1"),
+        "rec_min_mcap": get_setting("rec_min_mcap", "500"),
+        "rec_min_price": get_setting("rec_min_price", "50"),
     })

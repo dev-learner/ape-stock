@@ -214,6 +214,11 @@ pre {
     border-color: var(--accent);
 }
 
+.mini-btn.equal-width {
+    min-width: 110px;
+    text-align: center;
+}
+
 .sector-select {
     margin-left: 12px;
     background: var(--mid-blue);

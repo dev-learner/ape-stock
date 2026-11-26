@@ -1,110 +1,138 @@
-// static/js/tool4.js
-window.Tool4 = {
-    fullRank: false,
+// static/js/tool6.js
+// Tool 6 — Fundamentals
+// All view sorted by descending market cap with sequential #.
+// Recovery mode uses live settings; criteria shown in smaller font.
+
+window.Tool6 = {
+    recoveryMode: false,
 
     async show() {
-        const url = this.fullRank ? "/screener?mode=full" : "/screener";
-        const res = await fetch(url);
-        const data = await res.json();
-        const rows = data.rows || [];
+        const container = document.getElementById("results");
+        container.innerHTML = `<div style="padding:16px; color:#aaa;">Loading…</div>`;
 
-        let tool8Risers = new Set();
-        let tool8Fallers = new Set();
-        try {
-            const body = {
-                risers_index: "ALL",
-                fallers_index: "ALL",
-                limit: "all"
-            };
-            const tres = await fetch("/tool/8", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body)
-            });
-            const tdata = await tres.json();
-            const result = tdata.result || {};
-            (result.risers || []).forEach(r => tool8Risers.add(r.symbol));
-            (result.fallers || []).forEach(r => tool8Fallers.add(r.symbol));
-        } catch (e) {
-            console.warn("Could not load Tool 8 symbols", e);
+        if (this.recoveryMode) {
+            await this.showRecovery();
+        } else {
+            await this.showAll();
         }
-        window.AppState.tool8Risers = tool8Risers;
-        window.AppState.tool8Fallers = tool8Fallers;
-
-        this.render(rows);
     },
 
-    render(rows) {
+    async showAll() {
+        const res = await fetch("/fundamentals");
+        const data = await res.json();
+        const rows = (data.rows || []).sort((a, b) => (b.market_cap || 0) - (a.market_cap || 0));
+        this.render(rows, false, "Descending Mkt. Cap.");
+    },
+
+    async showRecovery() {
+        const recRes = await fetch("/screens/recovery");
+        const recData = await recRes.json();
+        const recoveryRows = recData.rows || [];
+
+        let settings = {};
+        try {
+            const sRes = await fetch("/settings/get");
+            settings = await sRes.json();
+        } catch (e) {}
+
+        const criteria = `Lookback ${settings.rec_lookback_months || 12}m, ` +
+                         `Drawdown ≥${settings.rec_min_drawdown || 35}%, ` +
+                         `Bounce ≥${settings.rec_min_bounce || 15}%, ` +
+                         `Above 50MA: ${settings.rec_require_50ma !== "0" ? "Yes" : "No"}, ` +
+                         `MCap ≥£${settings.rec_min_mcap || 500}m`;
+
+        if (!recoveryRows.length) {
+            this.render([], true, criteria);
+            return;
+        }
+
+        const fundRes = await fetch("/fundamentals");
+        const fundData = await fundRes.json();
+        const fundMap = {};
+        (fundData.rows || []).forEach(r => { fundMap[r.symbol] = r; });
+
+        const merged = recoveryRows.map((rec, idx) => {
+            const fund = fundMap[rec.symbol] || {};
+            return {
+                ...fund,
+                symbol: rec.symbol,
+                name: rec.name || fund.name,
+                recovery_rank: idx + 1
+            };
+        });
+
+        this.render(merged, true, criteria);
+    },
+
+    render(rows, isRecovery, criteria) {
         const container = document.getElementById("results");
-        const title = this.fullRank
-            ? `Screener — Full Rank (${rows.length})`
-            : `Screener (${rows.length} safe bets)`;
-        const toggleLabel = this.fullRank ? "Optimal Rank" : "Full Rank";
+        const title = `Fundamentals${isRecovery ? " — Recovery" : ""} (${rows.length}) — <span style="font-size:0.75em; color:#aaa;">Selected on: ${criteria}</span>`;
 
         container.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <h2>${title}</h2>
-                <div>
-                    <button id="rank-toggle" class="mini-btn" style="margin-right:8px; background:#1e3a5c;">${toggleLabel}</button>
-                    <button id="add-to-tracker" class="mini-btn" style="background:#1e5c3a;">Add selected to Tracker</button>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px;">
+                <h2 style="margin:0;">${title}</h2>
+                <div style="display:flex; gap:8px;">
+                    <button id="mode-toggle" class="mini-btn equal-width">${this.recoveryMode ? "All" : "Recovery"}</button>
+                    <button id="add-to-tracker" class="mini-btn equal-width" style="background:#1e5c3a;">Track!</button>
                 </div>
             </div>
-            <table class="data-table" id="screener-table">
+            <table class="data-table" id="fund-table">
                 <thead>
                     <tr>
-                        <th data-key="symbol" title="Ticker symbol">Symbol</th>
-                        <th data-key="name" title="Company name">Name</th>
-                        <th data-key="sector" title="Sector">Sector</th>
-                        <th data-key="rank" title="Daily rank (1 = best)">Rank</th>
-                        <th data-key="price" title="Latest price">Price</th>
-                        <th data-key="change_pct" title="Today's percentage change">Day %</th>
-                        <th data-key="ret_3m" title="3-month return">3m %</th>
-                        <th data-key="ret_6m" title="6-month return">6m %</th>
-                        <th data-key="dist_52w_high" title="Distance from 52-week high (0 = at the high)">Dist 52w</th>
-                        <th data-key="pct_from_50ma" title="Percentage above/below 50-day MA">vs 50MA</th>
-                        <th data-key="pct_from_200ma" title="Percentage above/below 200-day MA">vs 200MA</th>
-                        <th data-key="vol_20d" title="20-day realised volatility">Vol 20d</th>
-                        <th data-key="sector_rel_1d" title="1-day return relative to sector">Sec 1d</th>
-                        <th data-key="sector_rel_5d" title="5-day return relative to sector">Sec 5d</th>
+                        <th data-key="symbol">Symbol</th>
+                        <th data-key="name">Name</th>
+                        <th data-key="sector">Sector</th>
+                        <th data-key="rank">${isRecovery ? "Rank" : "#"}</th>
+                        <th data-key="market_cap">Market Cap</th>
+                        <th data-key="pe_trailing">Trailing PE</th>
+                        <th data-key="pe_forward">Forward PE</th>
+                        <th data-key="price_to_book">P/B</th>
+                        <th data-key="dividend_yield">Div Yield</th>
+                        <th data-key="roe">ROE</th>
+                        <th data-key="profit_margin">Profit Margin</th>
+                        <th data-key="revenue_growth">Rev Growth</th>
+                        <th data-key="beta">Beta</th>
+                        <th data-key="current_ratio">Current Ratio</th>
                         <th></th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${rows.map(r => {
-                        let indicator = "";
-                        if (window.AppState.tool8Risers?.has(r.symbol)) indicator = "🟢 ";
-                        else if (window.AppState.tool8Fallers?.has(r.symbol)) indicator = "🔴 ";
-                        const dayCls = (r.change_pct || 0) >= 0 ? "positive" : "negative";
-                        return `
+                    ${rows.map((r, idx) => `
                         <tr>
-                            <td>${indicator}${r.symbol}</td>
+                            <td>${r.symbol}</td>
                             <td>${(r.name || "").substring(0, 28)}</td>
                             <td>${r.sector || ""}</td>
-                            <td>${r.rank != null ? r.rank : ""}</td>
-                            <td class="price-cell" data-symbol="${r.symbol}">${formatNumber(r.price)}</td>
-                            <td class="day-cell ${dayCls}" data-symbol="${r.symbol}">${r.change_pct != null ? r.change_pct.toFixed(2) + "%" : ""}</td>
-                            <td class="${(r.ret_3m || 0) >= 0 ? "positive" : "negative"}">${r.ret_3m != null ? r.ret_3m.toFixed(1) : ""}</td>
-                            <td class="${(r.ret_6m || 0) >= 0 ? "positive" : "negative"}">${r.ret_6m != null ? r.ret_6m.toFixed(1) : ""}</td>
-                            <td>${r.dist_52w_high != null ? r.dist_52w_high.toFixed(1) : ""}</td>
-                            <td>${r.pct_from_50ma != null ? r.pct_from_50ma.toFixed(1) : ""}</td>
-                            <td>${r.pct_from_200ma != null ? r.pct_from_200ma.toFixed(1) : ""}</td>
-                            <td>${r.vol_20d != null ? r.vol_20d.toFixed(1) : ""}</td>
-                            <td class="${(r.sector_rel_1d || 0) >= 0 ? "positive" : "negative"}">${r.sector_rel_1d != null ? r.sector_rel_1d.toFixed(1) : ""}</td>
-                            <td class="${(r.sector_rel_5d || 0) >= 0 ? "positive" : "negative"}">${r.sector_rel_5d != null ? r.sector_rel_5d.toFixed(1) : ""}</td>
+                            <td>${isRecovery ? (r.recovery_rank ?? "") : (idx + 1)}</td>
+                            <td>${r.market_cap ? (r.market_cap / 1e9).toFixed(2) + "bn" : ""}</td>
+                            <td>${r.pe_trailing != null ? r.pe_trailing.toFixed(1) : ""}</td>
+                            <td>${r.pe_forward != null ? r.pe_forward.toFixed(1) : ""}</td>
+                            <td>${r.price_to_book != null ? r.price_to_book.toFixed(2) : ""}</td>
+                            <td>${r.dividend_yield != null ? (r.dividend_yield * 100).toFixed(2) + "%" : ""}</td>
+                            <td>${r.roe != null ? (r.roe * 100).toFixed(1) + "%" : ""}</td>
+                            <td>${r.profit_margin != null ? (r.profit_margin * 100).toFixed(1) + "%" : ""}</td>
+                            <td>${r.revenue_growth != null ? (r.revenue_growth * 100).toFixed(1) + "%" : ""}</td>
+                            <td>${r.beta != null ? r.beta.toFixed(2) : ""}</td>
+                            <td>${r.current_ratio != null ? r.current_ratio.toFixed(2) : ""}</td>
                             <td><input type="checkbox" data-symbol="${r.symbol}"></td>
-                        </tr>`;
-                    }).join("")}
+                        </tr>`).join("") || `<tr><td colspan="15" style="text-align:center; color:#666;">No data.</td></tr>`}
                 </tbody>
             </table>
         `;
 
-        document.getElementById("rank-toggle")?.addEventListener("click", () => {
-            this.fullRank = !this.fullRank;
+        this.bindControls(rows);
+        if (window.makeTableSortable) {
+            makeTableSortable(document.getElementById("fund-table"));
+        }
+    },
+
+    bindControls(rows) {
+        document.getElementById("mode-toggle")?.addEventListener("click", () => {
+            this.recoveryMode = !this.recoveryMode;
             this.show();
         });
 
         document.getElementById("add-to-tracker")?.addEventListener("click", async () => {
-            const checked = [...document.querySelectorAll("#screener-table input[type=checkbox]:checked")];
+            const checked = [...document.querySelectorAll("#fund-table input[type=checkbox]:checked")];
             if (!checked.length) return;
 
             const notional = parseFloat(localStorage.getItem("notional") || "500");
@@ -113,15 +141,17 @@ window.Tool4 = {
 
             for (const cb of checked) {
                 const sym = cb.dataset.symbol;
-                const row = rows.find(r => r.symbol === sym);
-                if (!row || row.price == null) continue;
+                const priceRes = await fetch(`/quote/${sym}`);
+                const priceData = await priceRes.json();
+                const price = priceData.price;
+                if (price == null) continue;
 
                 const res = await fetch("/holdings/open", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         symbol: sym,
-                        price: row.price,
+                        price: price,
                         notional: notional,
                         stamp_pct: stamp
                     })
@@ -130,67 +160,5 @@ window.Tool4 = {
             }
             alert(`Processed ${added} name(s)`);
         });
-
-        const table = document.getElementById("screener-table");
-        if (window.makeTableSortable) {
-            makeTableSortable(table, {
-                onSort: (key, dir) => this.updateDefaultHighlight(key, dir)
-            });
-        }
-
-        this.applyDefaultSort(table);
-    },
-
-    applyDefaultSort(table) {
-        const th = table.querySelector('th[data-key="ret_3m"]');
-        if (!th) return;
-        th.click();
-        th.click();
-        this.updateDefaultHighlight("ret_3m", -1);
-    },
-
-    updateDefaultHighlight(key, dir) {
-        const table = document.getElementById("screener-table");
-        if (!table) return;
-        const defaultTh = table.querySelector('th[data-key="ret_3m"]');
-        if (!defaultTh) return;
-
-        const isDefault = (key === "ret_3m" && dir === -1);
-        if (isDefault) {
-            defaultTh.style.background = "";
-        } else {
-            defaultTh.style.background = "rgba(248, 113, 113, 0.25)";
-        }
-    },
-
-    async refreshPrices() {
-        try {
-            const url = this.fullRank ? "/screener?mode=full" : "/screener";
-            const res = await fetch(url);
-            const data = await res.json();
-            const rows = data.rows || [];
-
-            if (!window.lastPrices) window.lastPrices = {};
-
-            rows.forEach(r => {
-                const priceCell = document.querySelector(`.price-cell[data-symbol="${r.symbol}"]`);
-                const dayCell = document.querySelector(`.day-cell[data-symbol="${r.symbol}"]`);
-
-                if (priceCell) {
-                    const old = window.lastPrices[r.symbol];
-                    const neu = r.price;
-                    priceCell.textContent = formatNumber(neu);
-                    if (old != null && neu != null && neu !== old) {
-                        triggerFlash(priceCell, neu > old);
-                    }
-                    window.lastPrices[r.symbol] = neu;
-                }
-
-                if (dayCell) {
-                    dayCell.textContent = r.change_pct != null ? r.change_pct.toFixed(2) + "%" : "";
-                    dayCell.className = `day-cell ${(r.change_pct || 0) >= 0 ? "positive" : "negative"}`;
-                }
-            });
-        } catch (e) {}
     }
 };
