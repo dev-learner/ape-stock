@@ -1,5 +1,7 @@
 # routes_screener.py
-# Screener endpoint extracted from the original routes.py.
+# Screener endpoint.
+# Modes: base, ta, full, optimal (default).
+# Always returns base_rank; "rank" field holds the active screener rank.
 
 from flask import Blueprint, request, jsonify
 from db import get_db, get_setting
@@ -8,15 +10,49 @@ bp = Blueprint("screener", __name__)
 
 @bp.route("/screener")
 def screener():
-    """Return Screener names with today's rank.
-    ?mode=full  -> all ranked symbols (including those failing current filters)
-    default     -> only current safe-bet names
-    """
     mode = request.args.get("mode", "optimal")
     conn = get_db()
     cur = conn.cursor()
 
-    # Valuation filter settings
+    if mode == "base":
+        cur.execute("""
+            SELECT q.symbol, q.name, q.sector, q.price, q.change_pct,
+                   q.ret_3m, q.ret_6m, q.dist_52w_high,
+                   q.above_50ma, q.pct_from_50ma,
+                   q.above_200ma, q.pct_from_200ma,
+                   q.vol_20d, q.sector_rel_1d, q.sector_rel_5d,
+                   q.market_cap, q.avg_volume,
+                   s.base_rank, s.base_rank AS rank
+            FROM index_quotes q
+            LEFT JOIN stock_scores s ON s.symbol = q.symbol
+                AND s.score_date = (SELECT MAX(score_date) FROM stock_scores)
+            WHERE q.symbol IS NOT NULL
+            ORDER BY s.base_rank ASC NULLS LAST
+        """)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return jsonify({"rows": rows, "mode": "base"})
+
+    if mode == "ta":
+        cur.execute("""
+            SELECT q.symbol, q.name, q.sector, q.price, q.change_pct,
+                   q.ret_3m, q.ret_6m, q.dist_52w_high,
+                   q.above_50ma, q.pct_from_50ma,
+                   q.above_200ma, q.pct_from_200ma,
+                   q.vol_20d, q.sector_rel_1d, q.sector_rel_5d,
+                   q.market_cap, q.avg_volume,
+                   s.base_rank, s.ta_rank AS rank
+            FROM index_quotes q
+            LEFT JOIN stock_scores s ON s.symbol = q.symbol
+                AND s.score_date = (SELECT MAX(score_date) FROM stock_scores)
+            WHERE q.symbol IS NOT NULL
+            ORDER BY s.ta_rank ASC NULLS LAST
+        """)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return jsonify({"rows": rows, "mode": "ta"})
+
+    # --- existing full / optimal logic ---
     use_valuation = get_setting("use_valuation", "0") == "1"
     try:
         pe_min = float(get_setting("pe_min", "5"))
@@ -55,9 +91,11 @@ def screener():
                    q.above_200ma, q.pct_from_200ma,
                    q.vol_20d, q.sector_rel_1d, q.sector_rel_5d,
                    q.market_cap, q.avg_volume,
-                   r.rank
+                   s.base_rank, r.rank
             FROM daily_ranks r
             LEFT JOIN index_quotes q ON q.symbol = r.symbol
+            LEFT JOIN stock_scores s ON s.symbol = r.symbol
+                AND s.score_date = (SELECT MAX(score_date) FROM stock_scores)
             WHERE r.date = ?
             ORDER BY r.rank ASC
         """, (rank_date,))
@@ -69,11 +107,12 @@ def screener():
                    q.above_200ma, q.pct_from_200ma,
                    q.vol_20d, q.sector_rel_1d, q.sector_rel_5d,
                    q.market_cap, q.avg_volume,
-                   r.rank
+                   s.base_rank, r.rank
             FROM index_quotes q
-            LEFT JOIN daily_ranks r
-                   ON r.symbol = q.symbol AND r.date = ?
+            LEFT JOIN daily_ranks r ON r.symbol = q.symbol AND r.date = ?
             LEFT JOIN fundamentals f ON f.symbol = q.symbol
+            LEFT JOIN stock_scores s ON s.symbol = q.symbol
+                AND s.score_date = (SELECT MAX(score_date) FROM stock_scores)
             WHERE q.above_50ma = 1
               AND q.above_200ma = 1
               AND (q.ret_3m IS NULL OR q.ret_3m > -15)
@@ -92,9 +131,11 @@ def screener():
                    q.above_200ma, q.pct_from_200ma,
                    q.vol_20d, q.sector_rel_1d, q.sector_rel_5d,
                    q.market_cap, q.avg_volume,
-                   NULL AS rank
+                   s.base_rank, NULL AS rank
             FROM index_quotes q
             LEFT JOIN fundamentals f ON f.symbol = q.symbol
+            LEFT JOIN stock_scores s ON s.symbol = q.symbol
+                AND s.score_date = (SELECT MAX(score_date) FROM stock_scores)
             WHERE q.above_50ma = 1
               AND q.above_200ma = 1
               AND (q.ret_3m IS NULL OR q.ret_3m > -15)

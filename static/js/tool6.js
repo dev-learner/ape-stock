@@ -1,27 +1,21 @@
 // static/js/tool6.js
 // Tool 6 — Fundamentals
-// All view: sequential # + "Descending Mkt. Cap." in smaller font.
-// Recovery view: live criteria in smaller font + Recovery rank.
+// Default Base Rank. Dropdown. Price + Day % columns. Rank header consistent. Dividend yield fixed.
 
 window.Tool6 = {
-    recoveryMode: false,
+    mode: "base",
 
     async show() {
         const container = document.getElementById("results");
         container.innerHTML = `<div style="padding:16px; color:#aaa;">Loading…</div>`;
-
-        if (this.recoveryMode) {
-            await this.showRecovery();
-        } else {
-            await this.showAll();
-        }
+        if (this.mode === "recovery") await this.showRecovery();
+        else await this.showBase();
     },
 
-    async showAll() {
-        const res = await fetch("/fundamentals");
+    async showBase() {
+        const res = await fetch("/fundamentals?mode=base");
         const data = await res.json();
-        const rows = (data.rows || []).sort((a, b) => (b.market_cap || 0) - (a.market_cap || 0));
-        this.render(rows, false, "Descending Mkt. Cap.");
+        this.render(data.rows || [], "Momentum 40% + Quality 30% + Valuation 20% + Liquidity 10%");
     },
 
     async showRecovery() {
@@ -35,14 +29,10 @@ window.Tool6 = {
             settings = await sRes.json();
         } catch (e) {}
 
-        const criteria = `Lookback ${settings.rec_lookback_months || 12}m, ` +
-                         `Drawdown ≥${settings.rec_min_drawdown || 35}%, ` +
-                         `Bounce ≥${settings.rec_min_bounce || 15}%, ` +
-                         `Above 50MA: ${settings.rec_require_50ma !== "0" ? "Yes" : "No"}, ` +
-                         `MCap ≥£${settings.rec_min_mcap || 500}m`;
+        const criteria = `Lookback ${settings.rec_lookback_months || 12}m, Drawdown ≥${settings.rec_min_drawdown || 35}%, Bounce ≥${settings.rec_min_bounce || 15}%, Above 50MA: ${settings.rec_require_50ma !== "0" ? "Yes" : "No"}, MCap ≥£${settings.rec_min_mcap || 500}m`;
 
         if (!recoveryRows.length) {
-            this.render([], true, criteria);
+            this.render([], criteria);
             return;
         }
 
@@ -53,27 +43,25 @@ window.Tool6 = {
 
         const merged = recoveryRows.map((rec, idx) => {
             const fund = fundMap[rec.symbol] || {};
-            return {
-                ...fund,
-                symbol: rec.symbol,
-                name: rec.name || fund.name,
-                recovery_rank: idx + 1
-            };
+            return { ...fund, symbol: rec.symbol, name: rec.name || fund.name, rank: idx + 1 };
         });
 
-        this.render(merged, true, criteria);
+        this.render(merged, criteria);
     },
 
-    render(rows, isRecovery, criteria) {
+    render(rows, criteria) {
         const container = document.getElementById("results");
-        const title = `Fundamentals${isRecovery ? " — Recovery" : ""} (${rows.length}) — <span style="font-size:0.75em; color:#aaa;">Selected on: ${criteria}</span>`;
+        const title = `Fundamentals (${rows.length}) — <span style="font-size:0.75em; color:#aaa;">Selected on: ${criteria}</span>`;
 
         container.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px;">
                 <h2 style="margin:0;">${title}</h2>
-                <div style="display:flex; gap:8px;">
-                    <button id="mode-toggle" class="mini-btn equal-width">${this.recoveryMode ? "All" : "Recovery"}</button>
-                    <button id="add-to-tracker" class="mini-btn equal-width" style="background:#1e5c3a;">Track!</button>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <select id="mode-select" class="mini-btn">
+                        <option value="base" ${this.mode === "base" ? "selected" : ""}>Base</option>
+                        <option value="recovery" ${this.mode === "recovery" ? "selected" : ""}>Recovery</option>
+                    </select>
+                    <button id="add-to-tracker" class="mini-btn" style="background:#1e5c3a;">Track!</button>
                 </div>
             </div>
             <table class="data-table" id="fund-table">
@@ -82,7 +70,9 @@ window.Tool6 = {
                         <th data-key="symbol">Symbol</th>
                         <th data-key="name">Name</th>
                         <th data-key="sector">Sector</th>
-                        <th data-key="rank">${isRecovery ? "Rank" : "#"}</th>
+                        <th data-key="rank">Rank</th>
+                        <th data-key="price">Price</th>
+                        <th data-key="change_pct">Day %</th>
                         <th data-key="market_cap">Market Cap</th>
                         <th data-key="pe_trailing">Trailing PE</th>
                         <th data-key="pe_forward">Forward PE</th>
@@ -97,12 +87,14 @@ window.Tool6 = {
                     </tr>
                 </thead>
                 <tbody>
-                    ${rows.map((r, idx) => `
+                    ${rows.map(r => `
                         <tr>
                             <td>${r.symbol}</td>
                             <td>${(r.name || "").substring(0, 28)}</td>
                             <td>${r.sector || ""}</td>
-                            <td>${isRecovery ? (r.recovery_rank ?? "") : (idx + 1)}</td>
+                            <td>${r.rank ?? r.base_rank ?? ""}</td>
+                            <td>${r.price != null ? formatNumber(r.price) : ""}</td>
+                            <td class="${(r.change_pct || 0) >= 0 ? "positive" : "negative"}">${r.change_pct != null ? r.change_pct.toFixed(2) + "%" : ""}</td>
                             <td>${r.market_cap ? (r.market_cap / 1e9).toFixed(2) + "bn" : ""}</td>
                             <td>${r.pe_trailing != null ? r.pe_trailing.toFixed(1) : ""}</td>
                             <td>${r.pe_forward != null ? r.pe_forward.toFixed(1) : ""}</td>
@@ -114,47 +106,37 @@ window.Tool6 = {
                             <td>${r.beta != null ? r.beta.toFixed(2) : ""}</td>
                             <td>${r.current_ratio != null ? r.current_ratio.toFixed(2) : ""}</td>
                             <td><input type="checkbox" data-symbol="${r.symbol}"></td>
-                        </tr>`).join("") || `<tr><td colspan="15" style="text-align:center; color:#666;">No data.</td></tr>`}
+                        </tr>`).join("") || `<tr><td colspan="17" style="text-align:center; color:#666;">No data.</td></tr>`}
                 </tbody>
             </table>
         `;
 
         this.bindControls(rows);
-        if (window.makeTableSortable) {
-            makeTableSortable(document.getElementById("fund-table"));
-        }
+        if (window.makeTableSortable) makeTableSortable(document.getElementById("fund-table"));
     },
 
     bindControls(rows) {
-        document.getElementById("mode-toggle")?.addEventListener("click", () => {
-            this.recoveryMode = !this.recoveryMode;
+        document.getElementById("mode-select")?.addEventListener("change", (e) => {
+            this.mode = e.target.value;
             this.show();
         });
 
         document.getElementById("add-to-tracker")?.addEventListener("click", async () => {
             const checked = [...document.querySelectorAll("#fund-table input[type=checkbox]:checked")];
             if (!checked.length) return;
-
             const notional = parseFloat(localStorage.getItem("notional") || "500");
             const stamp = parseFloat(localStorage.getItem("stampPct") || "0.5");
             let added = 0;
-
             for (const cb of checked) {
                 const sym = cb.dataset.symbol;
                 const priceRes = await fetch(`/quote/${sym}`);
                 const priceData = await priceRes.json();
                 const price = priceData.price;
                 if (price == null) continue;
-
                 const res = await fetch("/holdings/open", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        symbol: sym,
-                        price: price,
-                        notional: notional,
-                        stamp_pct: stamp
-                    })
+                    body: JSON.stringify({ symbol: sym, price, notional, stamp_pct: stamp })
                 });
                 if (res.ok || res.status === 409) added++;
             }
