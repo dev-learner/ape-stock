@@ -1,6 +1,7 @@
 // static/js/tool6.js
 // Tool 6 — Fundamentals
-// Recovery mode uses live settings in the title.
+// All view: sequential # + "Descending Mkt. Cap." in smaller font.
+// Recovery view: live criteria in smaller font + Recovery rank.
 
 window.Tool6 = {
     recoveryMode: false,
@@ -19,7 +20,8 @@ window.Tool6 = {
     async showAll() {
         const res = await fetch("/fundamentals");
         const data = await res.json();
-        this.render(data.rows || [], false, "All stocks with fundamental data");
+        const rows = (data.rows || []).sort((a, b) => (b.market_cap || 0) - (a.market_cap || 0));
+        this.render(rows, false, "Descending Mkt. Cap.");
     },
 
     async showRecovery() {
@@ -64,7 +66,7 @@ window.Tool6 = {
 
     render(rows, isRecovery, criteria) {
         const container = document.getElementById("results");
-        const title = `Fundamentals${isRecovery ? " — Recovery" : ""} (${rows.length}) — Selected on: ${criteria}`;
+        const title = `Fundamentals${isRecovery ? " — Recovery" : ""} (${rows.length}) — <span style="font-size:0.75em; color:#aaa;">Selected on: ${criteria}</span>`;
 
         container.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px;">
@@ -80,7 +82,7 @@ window.Tool6 = {
                         <th data-key="symbol">Symbol</th>
                         <th data-key="name">Name</th>
                         <th data-key="sector">Sector</th>
-                        ${isRecovery ? '<th data-key="rank" title="Recovery rank">Rank</th>' : ''}
+                        <th data-key="rank">${isRecovery ? "Rank" : "#"}</th>
                         <th data-key="market_cap">Market Cap</th>
                         <th data-key="pe_trailing">Trailing PE</th>
                         <th data-key="pe_forward">Forward PE</th>
@@ -95,12 +97,12 @@ window.Tool6 = {
                     </tr>
                 </thead>
                 <tbody>
-                    ${rows.map(r => `
+                    ${rows.map((r, idx) => `
                         <tr>
                             <td>${r.symbol}</td>
                             <td>${(r.name || "").substring(0, 28)}</td>
                             <td>${r.sector || ""}</td>
-                            ${isRecovery ? `<td>${r.recovery_rank ?? ""}</td>` : ''}
+                            <td>${isRecovery ? (r.recovery_rank ?? "") : (idx + 1)}</td>
                             <td>${r.market_cap ? (r.market_cap / 1e9).toFixed(2) + "bn" : ""}</td>
                             <td>${r.pe_trailing != null ? r.pe_trailing.toFixed(1) : ""}</td>
                             <td>${r.pe_forward != null ? r.pe_forward.toFixed(1) : ""}</td>
