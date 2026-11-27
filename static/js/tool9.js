@@ -30,7 +30,11 @@ window.Tool9 = {
         rec_min_bounce: "15",
         rec_require_50ma: "1",
         rec_min_mcap: "500",
-        rec_min_price: "50"
+        rec_min_price: "50",
+        // Weightings
+        weight_base: "40",
+        weight_ta: "30",
+        weight_fund: "30"
     },
 
     async show() {
@@ -176,6 +180,20 @@ window.Tool9 = {
                         </div>
                     </div>
 
+                    <!-- Weightings -->
+                    <div class="card">
+                        <h3>Weightings</h3>
+                        <label>Base (%)</label>
+                        <input type="number" id="weightBase" min="0" max="100" step="1">
+                        <label>TA (%)</label>
+                        <input type="number" id="weightTa" min="0" max="100" step="1">
+                        <label>Fundamentals (%)</label>
+                        <input type="number" id="weightFund" min="0" max="100" step="1">
+                        <div style="text-align:right; margin-top:12px;">
+                            <button class="mini-btn restore" data-section="weightings">Restore Defaults</button>
+                        </div>
+                    </div>
+
                 </div>
             </div>`;
 
@@ -233,6 +251,11 @@ window.Tool9 = {
             set("recMinMcap", "rec_min_mcap");
             set("recMinPrice", "rec_min_price");
 
+            // Weightings
+            set("weightBase", "weight_base");
+            set("weightTa", "weight_ta");
+            set("weightFund", "weight_fund");
+
             const useVal = document.getElementById("useValuation");
             if (useVal) useVal.checked = (merged.use_valuation === "1");
         } catch (e) {
@@ -248,7 +271,8 @@ window.Tool9 = {
             valuation: ["peMin", "peMax", "pbMax", "requireDividend"],
             candidates: ["candRankMax", "candPeMin", "candPeMax", "candPbMax", "candRequireDiv"],
             rsi: ["rsiOversold", "rsiOverbought", "rsiLength"],
-            recovery: ["recLookbackMonths", "recMinDrawdown", "recMinBounce", "recRequire50ma", "recMinMcap", "recMinPrice"]
+            recovery: ["recLookbackMonths", "recMinDrawdown", "recMinBounce", "recRequire50ma", "recMinMcap", "recMinPrice"],
+            weightings: ["weightBase", "weightTa", "weightFund"]
         };
         const keys = map[section] || [];
         keys.forEach(id => {
@@ -285,68 +309,73 @@ window.Tool9 = {
             rsiOversold: "rsiOversold",
             rsiOverbought: "rsiOverbought",
             rsiLength: "rsiLength",
-            // Recovery
             recLookbackMonths: "rec_lookback_months",
             recMinDrawdown: "rec_min_drawdown",
             recMinBounce: "rec_min_bounce",
             recRequire50ma: "rec_require_50ma",
             recMinMcap: "rec_min_mcap",
-            recMinPrice: "rec_min_price"
+            recMinPrice: "rec_min_price",
+            weightBase: "weight_base",
+            weightTa: "weight_ta",
+            weightFund: "weight_fund"
         };
         return map[id] || id;
     },
 
     async saveSettings() {
-        const payload = {
-            listLimit: document.getElementById("listLimit").value,
-            riserPct: document.getElementById("riserPct").value,
-            fallerPct: document.getElementById("fallerPct").value,
-            hitThreshold: document.getElementById("hitThreshold").value,
-            notional: document.getElementById("notional").value,
-            stampPct: document.getElementById("stampPct").value,
-            tracker_close_target: document.getElementById("trackerCloseTarget").value,
-            rank_window: document.getElementById("rankWindow").value,
-            rank_presence: document.getElementById("rankPresence").value,
-            rank_cutoff: document.getElementById("rankCutoff").value,
-            pe_min: document.getElementById("peMin").value,
-            pe_max: document.getElementById("peMax").value,
-            pb_max: document.getElementById("pbMax").value,
-            require_dividend: document.getElementById("requireDividend").value,
-            use_valuation: document.getElementById("useValuation").checked ? "1" : "0",
-            cand_rank_max: document.getElementById("candRankMax").value,
-            cand_pe_min: document.getElementById("candPeMin").value,
-            cand_pe_max: document.getElementById("candPeMax").value,
-            cand_pb_max: document.getElementById("candPbMax").value,
-            cand_require_div: document.getElementById("candRequireDiv").value,
-            rsiOversold: document.getElementById("rsiOversold").value,
-            rsiOverbought: document.getElementById("rsiOverbought").value,
-            rsiLength: document.getElementById("rsiLength").value,
-            // Recovery
-            rec_lookback_months: document.getElementById("recLookbackMonths").value,
-            rec_min_drawdown: document.getElementById("recMinDrawdown").value,
-            rec_min_bounce: document.getElementById("recMinBounce").value,
-            rec_require_50ma: document.getElementById("recRequire50ma").value,
-            rec_min_mcap: document.getElementById("recMinMcap").value,
-            rec_min_price: document.getElementById("recMinPrice").value
+        const data = {
+            listLimit: document.getElementById("listLimit")?.value,
+            riserPct: document.getElementById("riserPct")?.value,
+            fallerPct: document.getElementById("fallerPct")?.value,
+            hitThreshold: document.getElementById("hitThreshold")?.value,
+            notional: document.getElementById("notional")?.value,
+            stampPct: document.getElementById("stampPct")?.value,
+            tracker_close_target: document.getElementById("trackerCloseTarget")?.value,
+            rank_window: document.getElementById("rankWindow")?.value,
+            rank_presence: document.getElementById("rankPresence")?.value,
+            rank_cutoff: document.getElementById("rankCutoff")?.value,
+            pe_min: document.getElementById("peMin")?.value,
+            pe_max: document.getElementById("peMax")?.value,
+            pb_max: document.getElementById("pbMax")?.value,
+            require_dividend: document.getElementById("requireDividend")?.value,
+            use_valuation: document.getElementById("useValuation")?.checked ? "1" : "0",
+            cand_rank_max: document.getElementById("candRankMax")?.value,
+            cand_pe_min: document.getElementById("candPeMin")?.value,
+            cand_pe_max: document.getElementById("candPeMax")?.value,
+            cand_pb_max: document.getElementById("candPbMax")?.value,
+            cand_require_div: document.getElementById("candRequireDiv")?.value,
+            rsiOversold: document.getElementById("rsiOversold")?.value,
+            rsiOverbought: document.getElementById("rsiOverbought")?.value,
+            rsiLength: document.getElementById("rsiLength")?.value,
+            rec_lookback_months: document.getElementById("recLookbackMonths")?.value,
+            rec_min_drawdown: document.getElementById("recMinDrawdown")?.value,
+            rec_min_bounce: document.getElementById("recMinBounce")?.value,
+            rec_require_50ma: document.getElementById("recRequire50ma")?.value,
+            rec_min_mcap: document.getElementById("recMinMcap")?.value,
+            rec_min_price: document.getElementById("recMinPrice")?.value,
+            weight_base: document.getElementById("weightBase")?.value,
+            weight_ta: document.getElementById("weightTa")?.value,
+            weight_fund: document.getElementById("weightFund")?.value
         };
 
         try {
             const res = await fetch("/settings/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(data)
             });
             const msg = document.getElementById("settings-msg");
             if (res.ok) {
-                msg.textContent = "Settings saved";
-                msg.style.color = "#4ade80";
+                msg.textContent = "Settings saved.";
+                msg.style.color = "#7fdbff";
             } else {
-                msg.textContent = "Save failed";
+                msg.textContent = "Save failed.";
                 msg.style.color = "#f87171";
             }
-            setTimeout(() => { msg.textContent = ""; }, 2000);
         } catch (e) {
-            document.getElementById("settings-msg").textContent = "Save error";
+            const msg = document.getElementById("settings-msg");
+            msg.textContent = "Save failed.";
+            msg.style.color = "#f87171";
         }
     }
 };

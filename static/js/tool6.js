@@ -1,6 +1,7 @@
 // static/js/tool6.js
 // Tool 6 — Fundamentals
-// Default Base Rank. Dropdown. Price + Day % columns. Rank header consistent. Dividend yield fixed.
+// Dual rank columns: Rank = base_rank, Rank # = active screener rank.
+// Modes: Base, Fundamentals (valuation filter + fund rank), Recovery.
 
 window.Tool6 = {
     mode: "base",
@@ -8,7 +9,9 @@ window.Tool6 = {
     async show() {
         const container = document.getElementById("results");
         container.innerHTML = `<div style="padding:16px; color:#aaa;">Loading…</div>`;
-        if (this.mode === "recovery") await this.showRecovery();
+
+        if (this.mode === "fund") await this.showFund();
+        else if (this.mode === "recovery") await this.showRecovery();
         else await this.showBase();
     },
 
@@ -16,6 +19,23 @@ window.Tool6 = {
         const res = await fetch("/fundamentals?mode=base");
         const data = await res.json();
         this.render(data.rows || [], "Momentum 40% + Quality 30% + Valuation 20% + Liquidity 10%");
+    },
+
+    async showFund() {
+        const res = await fetch("/fundamentals?mode=fund");
+        const data = await res.json();
+
+        let settings = {};
+        try {
+            const sRes = await fetch("/settings/get");
+            settings = await sRes.json();
+        } catch (e) {}
+
+        const criteria = `PE ${settings.pe_min || 5}–${settings.pe_max || 40}, ` +
+                         `P/B < ${settings.pb_max || 4}, ` +
+                         `Div required: ${settings.require_dividend === "1" ? "Yes" : "No"}`;
+
+        this.render(data.rows || [], "ROE 25% + Op Margin 20% + Rev Growth 15% + PE 15% + P/B 15% + Div Yield 10%");
     },
 
     async showRecovery() {
@@ -29,21 +49,32 @@ window.Tool6 = {
             settings = await sRes.json();
         } catch (e) {}
 
-        const criteria = `Lookback ${settings.rec_lookback_months || 12}m, Drawdown ≥${settings.rec_min_drawdown || 35}%, Bounce ≥${settings.rec_min_bounce || 15}%, Above 50MA: ${settings.rec_require_50ma !== "0" ? "Yes" : "No"}, MCap ≥£${settings.rec_min_mcap || 500}m`;
+        const criteria = `Lookback ${settings.rec_lookback_months || 12}m, ` +
+                         `Drawdown ≥${settings.rec_min_drawdown || 35}%, ` +
+                         `Bounce ≥${settings.rec_min_bounce || 15}%, ` +
+                         `Above 50MA: ${settings.rec_require_50ma !== "0" ? "Yes" : "No"}, ` +
+                         `MCap ≥£${settings.rec_min_mcap || 500}m`;
 
         if (!recoveryRows.length) {
             this.render([], criteria);
             return;
         }
 
-        const fundRes = await fetch("/fundamentals");
-        const fundData = await fundRes.json();
-        const fundMap = {};
-        (fundData.rows || []).forEach(r => { fundMap[r.symbol] = r; });
+        // Pull base ranks so Rank column is populated
+        const baseRes = await fetch("/fundamentals?mode=base");
+        const baseData = await baseRes.json();
+        const baseMap = {};
+        (baseData.rows || []).forEach(r => { baseMap[r.symbol] = r; });
 
         const merged = recoveryRows.map((rec, idx) => {
-            const fund = fundMap[rec.symbol] || {};
-            return { ...fund, symbol: rec.symbol, name: rec.name || fund.name, rank: idx + 1 };
+            const base = baseMap[rec.symbol] || {};
+            return {
+                ...base,
+                symbol: rec.symbol,
+                name: rec.name || base.name,
+                rank: idx + 1,
+                base_rank: base.base_rank
+            };
         });
 
         this.render(merged, criteria);
@@ -59,6 +90,7 @@ window.Tool6 = {
                 <div style="display:flex; gap:8px; align-items:center;">
                     <select id="mode-select" class="mini-btn">
                         <option value="base" ${this.mode === "base" ? "selected" : ""}>Base</option>
+                        <option value="fund" ${this.mode === "fund" ? "selected" : ""}>Fundamentals</option>
                         <option value="recovery" ${this.mode === "recovery" ? "selected" : ""}>Recovery</option>
                     </select>
                     <button id="add-to-tracker" class="mini-btn" style="background:#1e5c3a;">Track!</button>
@@ -70,7 +102,8 @@ window.Tool6 = {
                         <th data-key="symbol">Symbol</th>
                         <th data-key="name">Name</th>
                         <th data-key="sector">Sector</th>
-                        <th data-key="rank">Rank</th>
+                        <th data-key="base_rank">Rank</th>
+                        <th data-key="rank">Rank #</th>
                         <th data-key="price">Price</th>
                         <th data-key="change_pct">Day %</th>
                         <th data-key="market_cap">Market Cap</th>
@@ -92,7 +125,8 @@ window.Tool6 = {
                             <td>${r.symbol}</td>
                             <td>${(r.name || "").substring(0, 28)}</td>
                             <td>${r.sector || ""}</td>
-                            <td>${r.rank ?? r.base_rank ?? ""}</td>
+                            <td>${r.base_rank ?? ""}</td>
+                            <td>${r.rank ?? ""}</td>
                             <td>${r.price != null ? formatNumber(r.price) : ""}</td>
                             <td class="${(r.change_pct || 0) >= 0 ? "positive" : "negative"}">${r.change_pct != null ? r.change_pct.toFixed(2) + "%" : ""}</td>
                             <td>${r.market_cap ? (r.market_cap / 1e9).toFixed(2) + "bn" : ""}</td>
@@ -106,7 +140,7 @@ window.Tool6 = {
                             <td>${r.beta != null ? r.beta.toFixed(2) : ""}</td>
                             <td>${r.current_ratio != null ? r.current_ratio.toFixed(2) : ""}</td>
                             <td><input type="checkbox" data-symbol="${r.symbol}"></td>
-                        </tr>`).join("") || `<tr><td colspan="17" style="text-align:center; color:#666;">No data.</td></tr>`}
+                        </tr>`).join("") || `<tr><td colspan="18" style="text-align:center; color:#666;">No data.</td></tr>`}
                 </tbody>
             </table>
         `;
@@ -124,19 +158,27 @@ window.Tool6 = {
         document.getElementById("add-to-tracker")?.addEventListener("click", async () => {
             const checked = [...document.querySelectorAll("#fund-table input[type=checkbox]:checked")];
             if (!checked.length) return;
+
             const notional = parseFloat(localStorage.getItem("notional") || "500");
             const stamp = parseFloat(localStorage.getItem("stampPct") || "0.5");
             let added = 0;
+
             for (const cb of checked) {
                 const sym = cb.dataset.symbol;
                 const priceRes = await fetch(`/quote/${sym}`);
                 const priceData = await priceRes.json();
                 const price = priceData.price;
                 if (price == null) continue;
+
                 const res = await fetch("/holdings/open", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ symbol: sym, price, notional, stamp_pct: stamp })
+                    body: JSON.stringify({
+                        symbol: sym,
+                        price: price,
+                        notional: notional,
+                        stamp_pct: stamp
+                    })
                 });
                 if (res.ok || res.status === 409) added++;
             }

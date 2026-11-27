@@ -1,15 +1,14 @@
 // static/js/tool12.js
 // Tool 12 — Screeners
-// v1: Recovery Screen with 1-year sparklines, high→low→current overlay,
-// and click-to-enlarge modal.
+// Composite ranking (best first) with 1-year sparklines and click-to-enlarge modal.
 
 window.Tool12 = {
     async show() {
         const container = document.getElementById("results");
-        container.innerHTML = `<div style="padding:16px; color:#aaa;">Loading Recovery Screen…</div>`;
+        container.innerHTML = `<div style="padding:16px; color:#aaa;">Loading composite ranking…</div>`;
 
         try {
-            const res = await fetch("/screens/recovery");
+            const res = await fetch("/screens/composite");
             const data = await res.json();
             this.render(data.rows || []);
         } catch (e) {
@@ -23,20 +22,17 @@ window.Tool12 = {
         const tableRows = rows.map(r => `
             <tr>
                 <td>${r.symbol}</td>
-                <td>${r.name || ""}</td>
-                <td>${r.high_date || ""}</td>
-                <td>${r.high_price != null ? r.high_price.toFixed(1) : ""}</td>
-                <td>${r.low_date || ""}</td>
-                <td>${r.low_price != null ? r.low_price.toFixed(1) : ""}</td>
-                <td class="negative">${r.drawdown_pct != null ? r.drawdown_pct.toFixed(1) + "%" : ""}</td>
-                <td class="positive">${r.bounce_pct != null ? r.bounce_pct.toFixed(1) + "%" : ""}</td>
-                <td>${r.current != null ? r.current.toFixed(1) : ""}</td>
-                <td>${r.rank != null ? r.rank : "—"}</td>
-                <td><canvas class="spark recovery-spark" width="120" height="32"
+                <td>${(r.name || "").substring(0, 28)}</td>
+                <td>${r.sector || ""}</td>
+                <td>${r.composite_rank ?? ""}</td>
+                <td>${r.composite_score != null ? r.composite_score.toFixed(1) : ""}</td>
+                <td>${r.base_rank ?? ""}</td>
+                <td>${r.ta_rank ?? ""}</td>
+                <td>${r.fund_rank ?? ""}</td>
+                <td>${r.price != null ? formatNumber(r.price) : ""}</td>
+                <td class="${(r.change_pct || 0) >= 0 ? "positive" : "negative"}">${r.change_pct != null ? r.change_pct.toFixed(2) + "%" : ""}</td>
+                <td><canvas class="spark composite-spark" width="120" height="32"
                             data-prices="${JSON.stringify(r.prices || [])}"
-                            data-high="${r.high_idx ?? ""}"
-                            data-low="${r.low_idx ?? ""}"
-                            data-current="${r.current_idx ?? ""}"
                             data-symbol="${r.symbol}"
                             data-name="${(r.name || "").replace(/"/g, "&quot;")}"
                             style="cursor:pointer;"></canvas></td>
@@ -45,27 +41,27 @@ window.Tool12 = {
 
         container.innerHTML = `
             <div class="region-bar">
-                <h3>Screeners — Recovery</h3>
-                <div style="color:#7fdbff; font-size:0.85rem;">${rows.length} candidates</div>
+                <h3>Screeners — Composite (${rows.length})</h3>
+                <div style="color:#7fdbff; font-size:0.85rem;">Ordered by weighted composite score</div>
             </div>
             <table class="data-table" id="screens-table">
                 <thead>
                     <tr>
-                        <th>Symbol</th>
-                        <th>Name</th>
-                        <th>High Date</th>
-                        <th>High</th>
-                        <th>Low Date</th>
-                        <th>Low</th>
-                        <th>Drawdown %</th>
-                        <th>Bounce %</th>
-                        <th>Current</th>
-                        <th>Rank</th>
+                        <th data-key="symbol">Symbol</th>
+                        <th data-key="name">Name</th>
+                        <th data-key="sector">Sector</th>
+                        <th data-key="composite_rank">Comp Rank</th>
+                        <th data-key="composite_score">Comp Score</th>
+                        <th data-key="base_rank">Base</th>
+                        <th data-key="ta_rank">TA</th>
+                        <th data-key="fund_rank">Fund</th>
+                        <th data-key="price">Price</th>
+                        <th data-key="change_pct">Day %</th>
                         <th>Sparkline</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${tableRows || "<tr><td colspan='11'>No recovery candidates found.</td></tr>"}
+                    ${tableRows || "<tr><td colspan='11'>No composite scores available. Run update_composite_score.py first.</td></tr>"}
                 </tbody>
             </table>
 
@@ -81,24 +77,17 @@ window.Tool12 = {
             </div>
         `;
 
-        // Draw small sparklines
-        document.querySelectorAll("canvas.recovery-spark").forEach(canvas => {
+        // Draw small sparklines and attach click handlers
+        document.querySelectorAll("canvas.composite-spark").forEach(canvas => {
             try {
                 const prices = JSON.parse(canvas.dataset.prices || "[]");
-                const highIdx = canvas.dataset.high !== "" ? parseInt(canvas.dataset.high, 10) : null;
-                const lowIdx = canvas.dataset.low !== "" ? parseInt(canvas.dataset.low, 10) : null;
-                const currIdx = canvas.dataset.current !== "" ? parseInt(canvas.dataset.current, 10) : null;
-                this.drawRecoverySparkline(canvas, prices, highIdx, lowIdx, currIdx);
+                this.drawSparkline(canvas, prices);
 
-                // Click to enlarge
                 canvas.addEventListener("click", () => {
                     this.openSparkModal(
                         canvas.dataset.symbol,
                         canvas.dataset.name,
-                        prices,
-                        highIdx,
-                        lowIdx,
-                        currIdx
+                        prices
                     );
                 });
             } catch (e) {
@@ -120,17 +109,17 @@ window.Tool12 = {
         }
     },
 
-    openSparkModal(symbol, name, prices, highIdx, lowIdx, currIdx) {
+    openSparkModal(symbol, name, prices) {
         const modal = document.getElementById("spark-modal");
         const title = document.getElementById("spark-modal-title");
         const canvas = document.getElementById("spark-modal-canvas");
 
         title.textContent = `${symbol} — ${name || ""}`;
-        this.drawRecoverySparkline(canvas, prices, highIdx, lowIdx, currIdx, true);
+        this.drawSparkline(canvas, prices, true);
         modal.classList.add("active");
     },
 
-    drawRecoverySparkline(canvas, values, highIdx, lowIdx, currIdx, large = false) {
+    drawSparkline(canvas, values, large = false) {
         if (!canvas || !values || values.length < 2) return;
         const ctx = canvas.getContext("2d");
         const w = canvas.width = large ? 600 : (canvas.offsetWidth || 120);
@@ -148,38 +137,11 @@ window.Tool12 = {
             y: h - ((v - min) / range) * (h - pad * 2) - pad
         }));
 
-        // Normal price line
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
         points.forEach(p => ctx.lineTo(p.x, p.y));
-        ctx.strokeStyle = "#778da9";
+        ctx.strokeStyle = "#7fdbff";
         ctx.lineWidth = large ? 2 : 1.2;
         ctx.stroke();
-
-        // Straight recovery path: high → low → current
-        const pathPoints = [];
-        if (highIdx != null && points[highIdx]) pathPoints.push(points[highIdx]);
-        if (lowIdx != null && points[lowIdx]) pathPoints.push(points[lowIdx]);
-        if (currIdx != null && points[currIdx]) pathPoints.push(points[currIdx]);
-
-        if (pathPoints.length >= 2) {
-            ctx.beginPath();
-            ctx.moveTo(pathPoints[0].x, pathPoints[0].y);
-            pathPoints.forEach(p => ctx.lineTo(p.x, p.y));
-            ctx.strokeStyle = "#7fdbff";
-            ctx.lineWidth = large ? 3 : 2;
-            ctx.setLineDash(large ? [6, 4] : [3, 2]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            // Dots
-            const radius = large ? 5 : 2.5;
-            pathPoints.forEach(p => {
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-                ctx.fillStyle = "#7fdbff";
-                ctx.fill();
-            });
-        }
     }
 };
