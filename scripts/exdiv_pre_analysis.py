@@ -4,6 +4,7 @@
 # DETAIL: Loads every stored ex-dividend date and measures the daily returns on T-5 through T-1. Also reports a simple T-10 control and breaks the T-1 results down by dividend-yield bucket. Read-only; makes no changes to the database. Limited by the single stored ex-date per symbol and one year of history.
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: analysis
 
 """
 Ex-Dividend Pre-Analysis

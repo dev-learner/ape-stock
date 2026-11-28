@@ -4,6 +4,7 @@
 # DETAIL: Takes the current top 30 from daily_ranks. For each stock identifies the start of the current sustained leadership phase (first close above the 50-day MA that was followed by at least 10 consecutive closes still above the 50-day). Records technical metrics at that start date and today, plus estimated market cap then vs current market cap. Read-only.
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: analysis
 
 """
 Leader Run Analysis

@@ -2,8 +2,9 @@
 # NAME: Update Fund Ranks
 # DESC: Calculates pure fundamentals rank (1-351) and stores fund_score / fund_rank.
 # DETAIL: Quality (ROE 25%, op margin 20%, rev growth 15%) + Valuation (PE 15%, PB 15%, div yield 10%). Percentile ranks. Safe to re-run. Does not touch base or TA ranks.
-# ALLOW_DELETE: 1
+# ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: scores
 
 """
 Update Fund Ranks

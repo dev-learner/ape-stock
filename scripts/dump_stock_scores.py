@@ -4,6 +4,7 @@
 # DETAIL: Shows symbol, score_date, base_score, base_rank and any other score columns. Safe read-only.
 # ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: dumps
 
 import sqlite3
 from pathlib import Path

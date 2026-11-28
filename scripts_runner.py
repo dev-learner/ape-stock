@@ -68,6 +68,7 @@ def scripts_meta():
     detail = ""
     allow_delete = 0
     run = ""
+    category = ""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
         for line in text.splitlines()[:40]:
@@ -83,6 +84,8 @@ def scripts_meta():
                 allow_delete = 1 if val == "1" else 0
             elif line.startswith("# RUN:"):
                 run = line[6:].strip()
+            elif line.startswith("# CATEGORY:"):
+                category = line[11:].strip()                
     except Exception:
         pass
 
@@ -92,7 +95,8 @@ def scripts_meta():
         "desc": desc,
         "detail": detail,
         "allow_delete": allow_delete,
-        "run": run
+        "run": run,
+        "category": category
     })
 
 # --- Pause control ---

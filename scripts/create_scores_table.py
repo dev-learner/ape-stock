@@ -4,6 +4,7 @@
 # DETAIL: Safe to re-run. Does not delete existing data.
 # ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: setup
 
 import sqlite3
 from pathlib import Path

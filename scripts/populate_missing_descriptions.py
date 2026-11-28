@@ -4,6 +4,7 @@
 # DETAIL: Uses a hard-coded dictionary of the previously missing FTSE 100/250 names (mostly investment trusts and specialist vehicles). Creates the table if needed. Safe to re-run (INSERT OR REPLACE).
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: data
 
 """
 Populate Missing Descriptions

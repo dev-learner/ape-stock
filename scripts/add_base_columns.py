@@ -3,6 +3,7 @@
 # DESC: Adds base_score and base_rank columns to stock_scores if they are missing.
 # ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: setup
 
 import sqlite3
 from pathlib import Path

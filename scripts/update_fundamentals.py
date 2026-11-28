@@ -4,6 +4,7 @@
 # DETAIL: Pulls key fundamental fields from Yahoo Finance for every symbol in index_constituents and upserts them into the fundamentals table. Also writes a dated row into fundamentals_history so changes can be tracked over time. Automatically run by the application when the data is stale. Safe to run manually. Does not delete existing history.
 # ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: scores
 
 """
 Update Fundamentals

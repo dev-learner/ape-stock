@@ -4,6 +4,7 @@
 # DETAIL: Identifies FTSE names that made a high in the last 12 months, fell at least 35 % from that high, have since bounced at least 15 % from the low, and are currently above their 50-day moving average. Minimum market cap £500 m. Shows high/low dates and prices, absolute and percentage drawdown/bounce, current price, and the stock’s current position in the full Screener ranking (if ranked). Read-only.
 # ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: uncategorised
 
 """
 Recovery Screen

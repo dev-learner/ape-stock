@@ -55,10 +55,12 @@ def composite_screen():
             f.dividend_yield,
             f.roe,
             f.profit_margin,
-            f.revenue_growth
+            f.revenue_growth,
+            cd.description
         FROM stock_scores s
         LEFT JOIN index_quotes q ON q.symbol = s.symbol
         LEFT JOIN fundamentals f ON f.symbol = s.symbol
+        LEFT JOIN company_descriptions cd ON cd.symbol = s.symbol
         WHERE s.score_date = (SELECT MAX(score_date) FROM stock_scores)
           AND s.composite_rank IS NOT NULL
         ORDER BY s.composite_rank ASC
@@ -84,7 +86,7 @@ def composite_screen():
 
         for row in rows:
             series = by_sym.get(row["symbol"], [])
-            row["prices"] = series[-252:] if series else []
+            row["prices"] = series[-2520:] if series else []   # ~10 years
 
     conn.close()
     return jsonify({

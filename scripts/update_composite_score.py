@@ -2,8 +2,9 @@
 # NAME: Update Composite Score
 # DESC: Calculates weighted composite score and rank from Base, TA, Fundamentals, Persistence and Recovery scores.
 # DETAIL: Reads all five weights from app_settings. Missing scores treated as 50. Writes composite_score and composite_rank. Safe to re-run.
-# ALLOW_DELETE: 1
+# ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: scores
 
 """
 Update Composite Score

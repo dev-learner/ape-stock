@@ -1,5 +1,7 @@
 // static/js/tool2.js
 window.Tool2 = {
+    currentFilter: "all",
+
     async show() {
         await fetch("/scripts/pause", {
             method: "POST",
@@ -47,9 +49,24 @@ window.Tool2 = {
                 const r = await fetch(`/scripts/meta?name=${encodeURIComponent(f)}`);
                 return await r.json();
             } catch {
-                return { name: f, friendly: f, desc: "", detail: "", allow_delete: 0 };
+                return { name: f, friendly: f, desc: "", detail: "", allow_delete: 0, category: "" };
             }
         }));
+
+        // Collect unique categories
+        const cats = new Set();
+        meta.forEach(m => {
+            if (m.category) {
+                m.category.split(",").forEach(c => cats.add(c.trim()));
+            }
+        });
+        const categories = ["all", ...Array.from(cats).sort()];
+
+        const filterBtns = categories.map(c => {
+            const label = c === "all" ? "All" : c.charAt(0).toUpperCase() + c.slice(1);
+            const active = this.currentFilter === c ? "active" : "";
+            return `<button class="mini-btn filter-btn ${active}" data-filter="${c}">${label}</button>`;
+        }).join("");
 
         let cardsHtml = "";
         meta.forEach(m => {
@@ -57,6 +74,10 @@ window.Tool2 = {
             const last = lastRuns[m.name] ? lastRuns[m.name].slice(0, 10) : "Never";
             const protectedClass = m.allow_delete === 0 ? "protected" : "";
             const lock = m.allow_delete === 0 ? '<span class="lock-icon" title="Protected">🔒</span>' : "";
+            const catList = (m.category || "").split(",").map(c => c.trim());
+            const show = this.currentFilter === "all" || catList.includes(this.currentFilter);
+            if (!show) return;
+
             cardsHtml += `
                 <div class="script-card ${protectedClass}" data-script="${m.name}">
                     <div class="script-card-body">
@@ -78,11 +99,14 @@ window.Tool2 = {
             <div id="tool2-warning" style="background:#5c2a2a; color:#fff; padding:10px 16px; border-radius:6px; margin-bottom:12px; font-weight:600;">
                 ⚠ Tool 2 active — background updates and auto-refresh are paused
             </div>
-            <div class="region-bar">
-                <h3>Ad-Hoc Scripts</h3>
+            <div class="region-bar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                <h3 style="margin:0;">Ad-Hoc Scripts</h3>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    ${filterBtns}
+                </div>
             </div>
             <div class="script-grid">
-                ${cardsHtml}
+                ${cardsHtml || "<p style='color:#aaa;'>No scripts in this category.</p>"}
             </div>
             <div style="margin-top:20px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -105,6 +129,14 @@ window.Tool2 = {
                 </div>
                 <pre id="script-output" class="script-output" style="margin-top:0;"></pre>
             </div>`;
+
+        // Filter buttons
+        document.querySelectorAll(".filter-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                this.currentFilter = btn.dataset.filter;
+                this.render(files);
+            });
+        });
 
         // Refresh
         document.getElementById("tool2-refresh").addEventListener("click", () => this.refresh());

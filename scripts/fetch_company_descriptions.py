@@ -4,6 +4,7 @@
 # DETAIL: Uses yfinance longBusinessSummary (trimmed to ~2–3 sentences). Creates the table if needed. Safe to re-run (INSERT OR REPLACE). Only processes symbols already present in index_quotes. Read-only on market data.
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: data
 
 """
 Fetch Company Descriptions

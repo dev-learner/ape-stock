@@ -4,6 +4,7 @@
 # DETAIL: Uses pe_trailing, price_to_book and dividend_yield. Easy to extend later. Safe to re-run.
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: scores
 
 import sqlite3
 from datetime import datetime, timezone

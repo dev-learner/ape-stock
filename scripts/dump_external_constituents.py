@@ -4,6 +4,7 @@
 # DETAIL: Diagnostic dump of any non-FTSE symbols that have been loaded. Read-only.
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: dumps
 
 """
 Dump External Constituents

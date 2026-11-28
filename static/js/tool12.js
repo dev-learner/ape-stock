@@ -99,7 +99,14 @@ window.Tool12 = {
 
             <div id="spark-modal" class="modal-overlay">
                 <div class="modal-box" style="width:640px; max-width:95vw;">
-                    <h3 id="spark-modal-title">Sparkline</h3>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h3 id="spark-modal-title" style="margin:0;">Sparkline</h3>
+                        <div style="display:flex; gap:6px;">
+                            <button class="mini-btn period-btn active" data-years="1">1y</button>
+                            <button class="mini-btn period-btn" data-years="5">5y</button>
+                            <button class="mini-btn period-btn" data-years="10">10y</button>
+                        </div>
+                    </div>
                     <canvas id="spark-modal-canvas" width="600" height="220" style="width:100%; height:220px; background:#0d1b2a; border-radius:4px;"></canvas>
                     <div class="modal-actions">
                         <button class="mini-btn" id="spark-modal-close">Close</button>
@@ -223,50 +230,84 @@ window.Tool12 = {
             const fmt = (v, dec = 1, suffix = "") =>
                 v != null ? Number(v).toFixed(dec) + suffix : "—";
 
-            const taRow = document.createElement("tr");
-            taRow.className = "detail-row";
-            taRow.innerHTML = `
-                <td colspan="14" style="background:#13293d; padding:10px 16px;">
-                    <div style="display:flex; flex-wrap:wrap; gap:18px 28px; font-size:0.88rem; line-height:1.6;">
-                        <span><strong style="color:#7fdbff;">TA</strong></span>
-                        <span>3m <strong>${fmt(row.ret_3m, 1, "%")}</strong></span>
-                        <span>6m <strong>${fmt(row.ret_6m, 1, "%")}</strong></span>
-                        <span>vs 50MA <strong>${fmt(row.pct_from_50ma, 1, "%")}</strong></span>
-                        <span>vs 200MA <strong>${fmt(row.pct_from_200ma, 1, "%")}</strong></span>
-                        <span>Dist 52w <strong>${fmt(row.dist_52w_high, 1, "%")}</strong></span>
-                        <span>Vol 20d <strong>${fmt(row.vol_20d, 1)}</strong></span>
+            const description = row.description || row.company_description || "No description available.";
+
+            const detailRow = document.createElement("tr");
+            detailRow.className = "detail-row";
+            detailRow.innerHTML = `
+                <td colspan="14" style="background:#000000; padding:0;">
+                    <div style="display:flex; gap:0;">
+                        <div style="flex:1; padding:10px 16px;">
+                            <div style="display:flex; flex-wrap:wrap; gap:18px 28px; font-size:0.88rem; line-height:1.6; margin-bottom:8px;">
+                                <span><strong style="color:#7fdbff;">TA</strong></span>
+                                <span>3m <strong>${fmt(row.ret_3m, 1, "%")}</strong></span>
+                                <span>6m <strong>${fmt(row.ret_6m, 1, "%")}</strong></span>
+                                <span>vs 50MA <strong>${fmt(row.pct_from_50ma, 1, "%")}</strong></span>
+                                <span>vs 200MA <strong>${fmt(row.pct_from_200ma, 1, "%")}</strong></span>
+                                <span>Dist 52w <strong>${fmt(row.dist_52w_high, 1, "%")}</strong></span>
+                                <span>Vol 20d <strong>${fmt(row.vol_20d, 1)}</strong></span>
+                            </div>
+                            <div style="display:flex; flex-wrap:wrap; gap:18px 28px; font-size:0.88rem; line-height:1.6;">
+                                <span><strong style="color:#7fdbff;">Fund</strong></span>
+                                <span>PE <strong>${fmt(row.pe_trailing, 1)}</strong></span>
+                                <span>Fwd PE <strong>${fmt(row.pe_forward, 1)}</strong></span>
+                                <span>P/B <strong>${fmt(row.price_to_book, 2)}</strong></span>
+                                <span>Yield <strong>${fmt(row.dividend_yield, 2, "%")}</strong></span>
+                                <span>ROE <strong>${fmt(row.roe, 1, "%")}</strong></span>
+                                <span>Margin <strong>${fmt(row.profit_margin, 1, "%")}</strong></span>
+                                <span>Rev Growth <strong>${fmt(row.revenue_growth, 1, "%")}</strong></span>
+                            </div>
+                        </div>
+                        <div style="width:340px; border-left:1px solid #333; padding:10px 14px; font-size:0.85rem; line-height:1.5; background:#111;">
+                            <div style="color:#7fdbff; font-weight:bold; margin-bottom:6px;">Company Description:</div>
+                            <div>${description}</div>
+                        </div>
                     </div>
                 </td>`;
 
-            const fundRow = document.createElement("tr");
-            fundRow.className = "detail-row";
-            fundRow.innerHTML = `
-                <td colspan="14" style="background:#0d1b2a; padding:10px 16px; border-bottom:2px solid #1b3a4b;">
-                    <div style="display:flex; flex-wrap:wrap; gap:18px 28px; font-size:0.88rem; line-height:1.6;">
-                        <span><strong style="color:#7fdbff;">Fund</strong></span>
-                        <span>PE <strong>${fmt(row.pe_trailing, 1)}</strong></span>
-                        <span>Fwd PE <strong>${fmt(row.pe_forward, 1)}</strong></span>
-                        <span>P/B <strong>${fmt(row.price_to_book, 2)}</strong></span>
-                        <span>Yield <strong>${fmt(row.dividend_yield, 2, "%")}</strong></span>
-                        <span>ROE <strong>${fmt(row.roe, 1, "%")}</strong></span>
-                        <span>Margin <strong>${fmt(row.profit_margin, 1, "%")}</strong></span>
-                        <span>Rev Growth <strong>${fmt(row.revenue_growth, 1, "%")}</strong></span>
-                    </div>
-                </td>`;
-
-            tr.after(fundRow);
-            tr.after(taRow);
+            tr.after(detailRow);
         });
     },
 
     openSparkModal(symbol, name, prices) {
         const modal = document.getElementById("spark-modal");
         document.getElementById("spark-modal-title").textContent = `${symbol} — ${name || ""}`;
-        this.drawSparkline(document.getElementById("spark-modal-canvas"), prices, true);
+
+        // Store full series on the modal for period switching
+        modal.dataset.prices = JSON.stringify(prices);
+        modal.dataset.years = "1";
+
+        this.drawModalChart();
         modal.classList.add("active");
+
+        // Period buttons
+        modal.querySelectorAll(".period-btn").forEach(btn => {
+            btn.classList.toggle("active", btn.dataset.years === "1");
+            btn.onclick = () => {
+                modal.dataset.years = btn.dataset.years;
+                modal.querySelectorAll(".period-btn").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                this.drawModalChart();
+            };
+        });
     },
 
-    drawSparkline(canvas, values, large = false) {
+    drawModalChart() {
+        const modal = document.getElementById("spark-modal");
+        const canvas = document.getElementById("spark-modal-canvas");
+        const allPrices = JSON.parse(modal.dataset.prices || "[]");
+        const years = parseInt(modal.dataset.years || "1", 10);
+        const pointsNeeded = years * 252;
+
+        // Visible window
+        const startIdx = Math.max(0, allPrices.length - pointsNeeded);
+        const visible = allPrices.slice(startIdx);
+
+        // Draw using the full series for MA calculation, but only the visible slice for the price line
+        this.drawSparkline(canvas, visible, true, allPrices, startIdx);
+    },
+
+drawSparkline(canvas, values, large = false, fullSeries = null, offset = 0) {
         if (!canvas || !values || values.length < 2) return;
         const ctx = canvas.getContext("2d");
         const w = canvas.width = large ? 600 : (canvas.offsetWidth || 120);
@@ -286,16 +327,21 @@ window.Tool12 = {
 
         const points = values.map((v, i) => toPoint(v, i));
 
+        // Use fullSeries for MA calculation when provided
+        const maSource = fullSeries || values;
+
         const ma = (period) => {
             const result = [];
-            for (let i = 0; i < values.length; i++) {
-                if (i < period - 1) result.push(null);
-                else {
-                    const slice = values.slice(i - period + 1, i + 1);
+            for (let i = 0; i < maSource.length; i++) {
+                if (i < period - 1) {
+                    result.push(null);
+                } else {
+                    const slice = maSource.slice(i - period + 1, i + 1);
                     result.push(slice.reduce((a, b) => a + b, 0) / period);
                 }
             }
-            return result;
+            // Return only the portion that matches the visible window
+            return result.slice(offset, offset + values.length);
         };
 
         const drawMA = (maValues, color, width) => {

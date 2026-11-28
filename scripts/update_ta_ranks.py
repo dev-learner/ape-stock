@@ -2,8 +2,9 @@
 # NAME: Update TA Ranks
 # DESC: Calculates pure technical rank (1-351) and stores ta_score / ta_rank.
 # DETAIL: 3m 25%, 6m 20%, vs 50MA 20%, vs 200MA 15%, dist 52w 10%, vol 20d 10%. Safe to re-run.
-# ALLOW_DELETE: 1
+# ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: scores
 
 import sqlite3
 from datetime import datetime, timezone

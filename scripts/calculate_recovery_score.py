@@ -2,8 +2,9 @@
 # NAME: Calculate Recovery Score
 # DESC: Computes a 0-100 Recovery score for every symbol and stores it.
 # DETAIL: Identifies Recovery Screen candidates using current Settings, scores them by bounce percentile (higher bounce = higher score). Non-candidates receive 0. Safe to re-run.
-# ALLOW_DELETE: 1
+# ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: scores
 
 """
 Calculate Recovery Score

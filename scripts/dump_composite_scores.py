@@ -4,6 +4,7 @@
 # DETAIL: Shows symbol, composite_score, composite_rank plus the component scores. Read-only. Safe.
 # ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: dumps
 
 """
 Dump Composite Scores

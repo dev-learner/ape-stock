@@ -4,6 +4,7 @@
 # DETAIL: Applies the four-point Hit scoring rules to every historical day in daily_closes and measures the subsequent net return (after stamp) over 1, 3, 5, 10 and 14 days. Only fallers that meet the Hit threshold are counted as signals. Uses current market cap as a proxy for the £-impact rule. Read-only.
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: analysis
 
 """
 Hit Score Back-test

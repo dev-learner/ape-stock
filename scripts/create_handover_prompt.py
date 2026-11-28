@@ -4,6 +4,7 @@
 # DETAIL: Outputs a standardised prompt that points a new assistant at the GitHub repository, lists the key entry-point files (including new Grok-It! and Screens-related files), and restates the project rules (UK-only, modular changes, complete-file returns, etc.). Read-only; makes no changes to the database or filesystem.
 # ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: setup
 
 """
 Generate Handover Prompt

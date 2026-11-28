@@ -2,8 +2,9 @@
 # NAME: Calculate Persistence Score
 # DESC: Computes a 0-100 Persistence score from the latest daily_ranks.
 # DETAIL: Converts rank into a percentile-style score (1 = 100). Safe to re-run.
-# ALLOW_DELETE: 1
+# ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: scores
 
 import sqlite3
 from datetime import datetime, timezone

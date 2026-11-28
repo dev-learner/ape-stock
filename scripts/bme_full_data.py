@@ -4,6 +4,7 @@
 # DETAIL: Dumps the complete latest row from index_quotes, fundamentals, the most recent daily close, the latest rank, watchlist status, and any open holdings for the symbol BME.L. Created as a reference for the data shape used by a single-stock Grok-It! prompt. Read-only; makes no changes to the database.
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: uncategorised
 
 """
 Dump BME.L Full Data

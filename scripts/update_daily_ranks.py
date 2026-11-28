@@ -4,6 +4,7 @@
 # DETAIL: Ranks every symbol that has daily closes by how often it appeared in the top-N of the Screener over the configured window. Results are written to the daily_ranks table (one row per symbol for the latest date). Automatically run by the application when ranks are stale. Safe to run manually. Does not delete historical ranks for previous dates.
 # ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: scores
 
 """
 Update Daily Ranks

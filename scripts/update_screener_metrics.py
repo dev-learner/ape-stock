@@ -4,6 +4,7 @@
 # DETAIL: Calculates 3-month and 6-month returns, distance from 52-week high, position relative to 50- and 200-day moving averages, 20-day volatility, and sector-relative performance. Results are written back to the index_quotes table. Automatically run by the application when the metrics are stale. Safe to run manually. Does not delete data.
 # ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: scores
 
 """
 Update Screener Metrics

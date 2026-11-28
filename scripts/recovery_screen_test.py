@@ -4,6 +4,7 @@
 # DETAIL: Identifies stocks that made a prior high, suffered a significant drawdown, and have since turned up. Parameters (look-back months, minimum drawdown %, recovery confirmation) are set at the top of the file so different combinations can be tried quickly. Prints the current candidates and basic stats. Read-only.
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: analysis
 
 """
 Recovery Screen Test

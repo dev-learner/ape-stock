@@ -4,6 +4,7 @@
 # DETAIL: Runs every combination of look-back (6/9/12 months), minimum drawdown (25/30/35/40 %) and recovery-from-low (10/15/20 %). For each combination reports the number of candidates and the top 5 symbols by bounce. Requires stocks to be above the 50-day MA. Read-only. Use the summary to choose the most meaningful parameter set.
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: analysis
 
 """
 Recovery Screen Grid Search

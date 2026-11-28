@@ -2,8 +2,9 @@
 # NAME: Update Base Ranks
 # DESC: Calculates the balanced base score and global rank (1-351) for every symbol.
 # DETAIL: Momentum/Trend 40%, Quality 30%, Valuation 20%, Liquidity & Risk 10%. Writes base_score and base_rank to stock_scores for today's date. Safe to re-run. Does not touch daily_ranks.
-# ALLOW_DELETE: 1
+# ALLOW_DELETE: 0
 # RUN: Tool2
+# CATEGORY: scores
 
 """
 Update Base Ranks

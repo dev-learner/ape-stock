@@ -4,6 +4,7 @@
 # DETAIL: Diagnostic dump of the current fundamentals snapshot. Read-only.
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: dumps
 
 """
 Dump Fundamentals

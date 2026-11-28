@@ -4,6 +4,7 @@
 # DETAIL: Scans daily_closes and counts gap-up and gap-down days (open versus previous close) above a configurable threshold. Displays a sorted table with symbol, name, gap counts, and the latest rank from daily_ranks. Read-only; makes no changes to the database.
 # ALLOW_DELETE: 1
 # RUN: Tool2
+# CATEGORY: uncategorised
 
 """
 Gap Up / Gap Down Counts
