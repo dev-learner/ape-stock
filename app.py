@@ -93,11 +93,45 @@ def ensure_fundamentals():
     else:
         print("Fundamentals up to date")
 
+def ensure_scores():
+    """Ensure all component scores and the composite exist for today."""
+    if _needs_run("scores_updated", hours=20):
+        print("Scores stale or missing — updating…")
+        scripts = [
+            "update_base_ranks.py",
+            "update_ta_ranks.py",
+            "update_fund_ranks.py",
+            "calculate_persistence_score.py",
+            "calculate_recovery_score.py",
+            "update_composite_score.py",
+        ]
+        for name in scripts:
+            script = Path(__file__).parent / "scripts" / name
+            try:
+                subprocess.run([sys.executable, str(script)], check=False, timeout=180)
+            except Exception as e:
+                print(f"{name} failed: {e}")
+        # stamp the timestamp
+        from db import get_db
+        conn = get_db()
+        cur = conn.cursor()
+        now = datetime.now(ZoneInfo("Europe/London")).isoformat()
+        cur.execute("""
+            INSERT INTO app_settings (key, value)
+            VALUES ('scores_updated', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """, (now,))
+        conn.commit()
+        conn.close()
+    else:
+        print("Scores up to date")        
+
 if __name__ == "__main__":
     init_db()
     catchup_daily_closes()
     ensure_screener_metrics()
     ensure_daily_ranks()
     ensure_fundamentals()
+    ensure_scores()
     threading.Thread(target=background_updater, daemon=True).start()
     app.run(host="0.0.0.0", port=5050, debug=False)

@@ -24,17 +24,17 @@ window.Tool9 = {
         rsiOversold: "30",
         rsiOverbought: "70",
         rsiLength: "7",
-        // Recovery Screen
         rec_lookback_months: "12",
         rec_min_drawdown: "35",
         rec_min_bounce: "15",
         rec_require_50ma: "1",
         rec_min_mcap: "500",
         rec_min_price: "50",
-        // Weightings
-        weight_base: "40",
-        weight_ta: "30",
-        weight_fund: "30"
+        weight_base: "30",
+        weight_ta: "25",
+        weight_fund: "25",
+        weight_persistence: "10",
+        weight_recovery: "10"
     },
 
     async show() {
@@ -49,7 +49,6 @@ window.Tool9 = {
 
                 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px;">
 
-                    <!-- Lists & Thresholds -->
                     <div class="card">
                         <h3>Lists & Thresholds</h3>
                         <label>Limit Lists</label>
@@ -72,7 +71,6 @@ window.Tool9 = {
                         </div>
                     </div>
 
-                    <!-- Position & Costs -->
                     <div class="card">
                         <h3>Position & Costs</h3>
                         <label>Default Notional (£)</label>
@@ -86,7 +84,6 @@ window.Tool9 = {
                         </div>
                     </div>
 
-                    <!-- Ranking -->
                     <div class="card">
                         <h3>Ranking</h3>
                         <label>Persistence window (days)</label>
@@ -100,7 +97,6 @@ window.Tool9 = {
                         </div>
                     </div>
 
-                    <!-- Valuation Filters -->
                     <div class="card">
                         <h3>Valuation Filters (Tool 4)</h3>
                         <label style="display:flex; align-items:center; gap:8px;">
@@ -122,7 +118,6 @@ window.Tool9 = {
                         </div>
                     </div>
 
-                    <!-- Candidates (Tool 7) -->
                     <div class="card">
                         <h3>Candidates (Tool 7)</h3>
                         <label>Rank cut-off (max)</label>
@@ -143,7 +138,6 @@ window.Tool9 = {
                         </div>
                     </div>
 
-                    <!-- RSI -->
                     <div class="card">
                         <h3>RSI Settings</h3>
                         <label>Oversold Below</label>
@@ -157,7 +151,6 @@ window.Tool9 = {
                         </div>
                     </div>
 
-                    <!-- Recovery Screen -->
                     <div class="card">
                         <h3>Recovery Screen</h3>
                         <label>Look-back (months)</label>
@@ -180,7 +173,6 @@ window.Tool9 = {
                         </div>
                     </div>
 
-                    <!-- Weightings -->
                     <div class="card">
                         <h3>Weightings</h3>
                         <label>Base (%)</label>
@@ -189,6 +181,10 @@ window.Tool9 = {
                         <input type="number" id="weightTa" min="0" max="100" step="1">
                         <label>Fundamentals (%)</label>
                         <input type="number" id="weightFund" min="0" max="100" step="1">
+                        <label>Persistence (%)</label>
+                        <input type="number" id="weightPersistence" min="0" max="100" step="1">
+                        <label>Recovery (%)</label>
+                        <input type="number" id="weightRecovery" min="0" max="100" step="1">
                         <div style="text-align:right; margin-top:12px;">
                             <button class="mini-btn restore" data-section="weightings">Restore Defaults</button>
                         </div>
@@ -242,19 +238,17 @@ window.Tool9 = {
             set("rsiOversold", "rsiOversold");
             set("rsiOverbought", "rsiOverbought");
             set("rsiLength", "rsiLength");
-
-            // Recovery
             set("recLookbackMonths", "rec_lookback_months");
             set("recMinDrawdown", "rec_min_drawdown");
             set("recMinBounce", "rec_min_bounce");
             set("recRequire50ma", "rec_require_50ma");
             set("recMinMcap", "rec_min_mcap");
             set("recMinPrice", "rec_min_price");
-
-            // Weightings
             set("weightBase", "weight_base");
             set("weightTa", "weight_ta");
             set("weightFund", "weight_fund");
+            set("weightPersistence", "weight_persistence");
+            set("weightRecovery", "weight_recovery");
 
             const useVal = document.getElementById("useValuation");
             if (useVal) useVal.checked = (merged.use_valuation === "1");
@@ -272,7 +266,7 @@ window.Tool9 = {
             candidates: ["candRankMax", "candPeMin", "candPeMax", "candPbMax", "candRequireDiv"],
             rsi: ["rsiOversold", "rsiOverbought", "rsiLength"],
             recovery: ["recLookbackMonths", "recMinDrawdown", "recMinBounce", "recRequire50ma", "recMinMcap", "recMinPrice"],
-            weightings: ["weightBase", "weightTa", "weightFund"]
+            weightings: ["weightBase", "weightTa", "weightFund", "weightPersistence", "weightRecovery"]
         };
         const keys = map[section] || [];
         keys.forEach(id => {
@@ -317,7 +311,9 @@ window.Tool9 = {
             recMinPrice: "rec_min_price",
             weightBase: "weight_base",
             weightTa: "weight_ta",
-            weightFund: "weight_fund"
+            weightFund: "weight_fund",
+            weightPersistence: "weight_persistence",
+            weightRecovery: "weight_recovery"
         };
         return map[id] || id;
     },
@@ -355,7 +351,9 @@ window.Tool9 = {
             rec_min_price: document.getElementById("recMinPrice")?.value,
             weight_base: document.getElementById("weightBase")?.value,
             weight_ta: document.getElementById("weightTa")?.value,
-            weight_fund: document.getElementById("weightFund")?.value
+            weight_fund: document.getElementById("weightFund")?.value,
+            weight_persistence: document.getElementById("weightPersistence")?.value,
+            weight_recovery: document.getElementById("weightRecovery")?.value
         };
 
         try {

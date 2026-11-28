@@ -4,6 +4,9 @@ venv/
 .venv/
 env/
 
+# dump-save files
+dump-save/
+
 # Python cache
 __pycache__/
 *.py[cod]

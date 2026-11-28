@@ -12,11 +12,22 @@ bp = Blueprint("screens", __name__)
 
 @bp.route("/screens/composite")
 def composite_screen():
-    """Return all symbols ordered by latest composite_score (best first).
-    Includes component ranks, scores, and a 1-year price series for sparklines.
+    """Return symbols ordered by latest composite_score (best first).
+    Respects Limit Lists. Includes component scores, TA metrics (from index_quotes),
+    fundamentals and 1-year prices.
     """
     conn = get_db()
     cur = conn.cursor()
+
+    limit_raw = get_setting("listLimit", "25")
+    limit = None
+    if limit_raw and str(limit_raw).lower() != "all":
+        try:
+            limit = int(limit_raw)
+            if limit <= 0:
+                limit = None
+        except (TypeError, ValueError):
+            limit = None
 
     cur.execute("""
         SELECT
@@ -25,40 +36,62 @@ def composite_screen():
             q.sector,
             q.price,
             q.change_pct,
-            s.base_rank,
             s.base_score,
-            s.ta_rank,
             s.ta_score,
-            s.fund_rank,
             s.fund_score,
+            s.persistence_score,
+            s.recovery_score,
             s.composite_score,
-            s.composite_rank
+            s.composite_rank,
+            q.ret_3m,
+            q.ret_6m,
+            q.pct_from_50ma,
+            q.pct_from_200ma,
+            q.dist_52w_high,
+            q.vol_20d,
+            f.pe_trailing,
+            f.pe_forward,
+            f.price_to_book,
+            f.dividend_yield,
+            f.roe,
+            f.profit_margin,
+            f.revenue_growth
         FROM stock_scores s
         LEFT JOIN index_quotes q ON q.symbol = s.symbol
+        LEFT JOIN fundamentals f ON f.symbol = s.symbol
         WHERE s.score_date = (SELECT MAX(score_date) FROM stock_scores)
           AND s.composite_rank IS NOT NULL
         ORDER BY s.composite_rank ASC
     """)
     rows = [dict(r) for r in cur.fetchall()]
 
-    cur.execute("""
-        SELECT symbol, date, close
-        FROM daily_closes
-        WHERE close IS NOT NULL
-        ORDER BY symbol, date
-    """)
-    by_sym = defaultdict(list)
-    for r in cur.fetchall():
-        by_sym[r["symbol"]].append(float(r["close"]))
+    if limit is not None:
+        rows = rows[:limit]
 
-    for row in rows:
-        series = by_sym.get(row["symbol"], [])
-        row["prices"] = series[-252:] if series else []
+    if rows:
+        symbols = [r["symbol"] for r in rows]
+        placeholders = ",".join("?" * len(symbols))
+        cur.execute(f"""
+            SELECT symbol, date, close
+            FROM daily_closes
+            WHERE close IS NOT NULL
+              AND symbol IN ({placeholders})
+            ORDER BY symbol, date
+        """, symbols)
+        by_sym = defaultdict(list)
+        for r in cur.fetchall():
+            by_sym[r["symbol"]].append(float(r["close"]))
+
+        for row in rows:
+            series = by_sym.get(row["symbol"], [])
+            row["prices"] = series[-252:] if series else []
 
     conn.close()
     return jsonify({
         "screen": "composite",
         "count": len(rows),
+        "limited": limit is not None,
+        "limit": limit,
         "rows": rows
     })
 

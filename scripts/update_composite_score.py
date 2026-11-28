@@ -1,7 +1,7 @@
 # scripts/update_composite_score.py
 # NAME: Update Composite Score
-# DESC: Calculates weighted composite score and rank from Base, TA and Fundamentals scores.
-# DETAIL: Reads weight_base, weight_ta, weight_fund from app_settings (defaults 40/30/30). Writes composite_score and composite_rank. Safe to re-run.
+# DESC: Calculates weighted composite score and rank from Base, TA, Fundamentals, Persistence and Recovery scores.
+# DETAIL: Reads all five weights from app_settings. Missing scores treated as 50. Writes composite_score and composite_rank. Safe to re-run.
 # ALLOW_DELETE: 1
 # RUN: Tool2
 
@@ -9,7 +9,7 @@
 Update Composite Score
 ----------------------
 Produces the final weighted score used for Tool 12 ordering.
-Weights are read from Settings.
+Weights are read from Settings and normalised to sum to 1.
 """
 
 import sqlite3
@@ -41,23 +41,29 @@ def main():
         except sqlite3.OperationalError:
             pass
 
-    # Read weights (normalise so they sum to 1.0)
+    # Read weights
     w_base = get_weight(cur, "weight_base", 40)
     w_ta = get_weight(cur, "weight_ta", 30)
     w_fund = get_weight(cur, "weight_fund", 30)
-    total = w_base + w_ta + w_fund
+    w_pers = get_weight(cur, "weight_persistence", 0)
+    w_rec = get_weight(cur, "weight_recovery", 0)
+
+    total = w_base + w_ta + w_fund + w_pers + w_rec
     if total <= 0:
-        w_base, w_ta, w_fund = 40, 30, 30
+        w_base, w_ta, w_fund, w_pers, w_rec = 40, 30, 30, 0, 0
         total = 100
     w_base /= total
     w_ta /= total
     w_fund /= total
+    w_pers /= total
+    w_rec /= total
 
-    print(f"Weights: Base {w_base*100:.1f}%  TA {w_ta*100:.1f}%  Fund {w_fund*100:.1f}%")
+    print(f"Weights: Base {w_base*100:.1f}%  TA {w_ta*100:.1f}%  Fund {w_fund*100:.1f}%  "
+          f"Pers {w_pers*100:.1f}%  Rec {w_rec*100:.1f}%")
 
-    # Latest scores
     cur.execute("""
-        SELECT symbol, base_score, ta_score, fund_score
+        SELECT symbol, base_score, ta_score, fund_score,
+               persistence_score, recovery_score
         FROM stock_scores
         WHERE score_date = (SELECT MAX(score_date) FROM stock_scores)
           AND symbol IS NOT NULL
@@ -73,7 +79,10 @@ def main():
         base = r["base_score"] if r["base_score"] is not None else 50.0
         ta = r["ta_score"] if r["ta_score"] is not None else 50.0
         fund = r["fund_score"] if r["fund_score"] is not None else 50.0
-        composite = (base * w_base) + (ta * w_ta) + (fund * w_fund)
+        pers = r["persistence_score"] if r["persistence_score"] is not None else 50.0
+        rec = r["recovery_score"] if r["recovery_score"] is not None else 0.0
+        composite = (base * w_base + ta * w_ta + fund * w_fund +
+                     pers * w_pers + rec * w_rec)
         scored.append((r["symbol"], round(composite, 2)))
 
     scored.sort(key=lambda x: -x[1])
@@ -95,6 +104,10 @@ def main():
     print("Top 10:")
     for i, (sym, sc) in enumerate(scored[:10], 1):
         print(f"  {i:2}. {sym:<8} {sc}")
+
+def run_composite_update():
+    """Callable entry point for use from routes or background tasks."""
+    main()
 
 if __name__ == "__main__":
     main()
